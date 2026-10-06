@@ -65,6 +65,26 @@ enum NotchGestureTests {
         suite.expect(feed(0, 0.1, began: true) == nil, "a slow swipe begins below direction slop")
         for _ in 0..<7 { suite.expect(feed(0, 0.5) == nil, "subpoint travel accumulates without firing") }
         suite.expect(feed(0, 21) == .open, "slow travel contributes to the action threshold")
+        suite.expect(feed(0, 15, began: true) == nil && feed(0, 1) == .open,
+               "a short downward swipe opens the island")
+        suite.expect(feed(0, 6, began: true) == nil && feed(0, 4) == nil && feed(0, 0, ended: true) == nil
+               && feed(0, 8, momentum: true, phased: false) == .open,
+               "the momentum of a quick flick finishes the opening it began")
+        suite.expect(feed(0, 30, momentum: true, phased: false) == nil
+               && feed(0, 0, momentum: true, phased: false) == nil,
+               "a flick opens the island once")
+        suite.expect(feed(0, -6, began: true, expanded: true) == nil && feed(0, 0, ended: true, expanded: true) == nil
+               && feed(0, -12, momentum: true, phased: false, expanded: true) == .close,
+               "the momentum of a quick upward flick closes the island")
+        suite.expect(feed(0, 2, began: true) == nil && feed(0, 0, ended: true) == nil
+               && feed(0, 40, momentum: true, phased: false) == nil,
+               "momentum cannot open the island for a touch that never chose a direction")
+        suite.expect(feed(-15, 0, began: true) == nil && feed(0, 0, ended: true) == nil
+               && feed(-80, 0, momentum: true, phased: false) == nil,
+               "momentum never finishes a track change")
+        suite.expect(feed(0, 6, began: true) == nil && feed(0, 0, ended: true) == nil
+               && feed(0, 40) == nil && feed(0, 40, momentum: true, phased: false) == nil,
+               "a lifted flick cannot resume from a later changed event")
         suite.expect(feed(0, 5, began: true) == nil && feed(-80, 0) == nil,
                "an established vertical gesture cannot become a track skip")
         suite.expect(feed(-20, 0, began: true) == nil && feed(-19, 0) == nil && feed(-1, 0) == .nextTrack,
