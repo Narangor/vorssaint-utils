@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Dynamic Island
 - Up next says when the player does not share its upcoming songs, instead of showing an empty queue.
 - The volume indicator stays hidden while headphones like AirPods Pro adjust their own level. Volume keys still show it.
+- Now Playing follows music and videos from browsers and other apps on its own, and a paused video stays instead of switching to paused music. Settings → Dynamic Island → Content → Music → Automatically include videos and other apps.
 
 ### Changed
 - Clear unpinned asks first everywhere and says how many items it removes. Anything copied while it asks is kept.
@@ -17,7 +18,7 @@ All notable changes to this project are documented here. The format follows
 - In the Clipboard history window, a new copy no longer moves the highlight, so Return pastes the entry you picked.
 
 ### Contributors
-Thanks to @mugurc and @PathGao. Feedback: Martimm500.
+Thanks to @djc041006-bot, @mugurc and @PathGao. Feedback: Martimm500.
 
 ## [3.4.1-beta.2] - 2026-10-06
 

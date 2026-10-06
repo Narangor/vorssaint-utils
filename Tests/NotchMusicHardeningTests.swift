@@ -563,6 +563,9 @@ enum NotchMusicHardeningTests {
                      "an explicit browser selection overrides simultaneous music playback")
         suite.expect(choose([paused, idleBrowser], previous: 10, system: 10, includeOtherPlayers: true) == paused,
                      "an unrelated paused browser cannot replace a music resume control")
+        suite.expect(choose([paused, idleBrowser], previous: 20, system: 20, includeOtherPlayers: true) == idleBrowser
+                     && choose([paused, idleBrowser], previous: 20, system: 20) == paused,
+                     "pausing a followed browser keeps its resume control instead of switching to paused music")
         suite.expect(NotchPlaybackSource.preferred(in: [music, idleBrowser], previousPID: 20, systemPID: 10,
                                                    selection: browser.selection) == idleBrowser,
                      "pausing a chosen browser keeps its resume control reachable")
