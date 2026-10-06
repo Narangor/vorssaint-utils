@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Dynamic Island
 - Up next says when the player does not share its upcoming songs, instead of showing an empty queue.
 - The volume indicator stays hidden while headphones like AirPods Pro adjust their own level. Volume keys still show it.
+- Switching between Timer, Pomodoro and Stopwatch animates as changing pages does, instead of the island jumping to its new size.
 
 ### Changed
 - Clear unpinned asks first everywhere and says how many items it removes. Anything copied while it asks is kept.
