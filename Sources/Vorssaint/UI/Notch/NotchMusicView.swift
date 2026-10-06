@@ -12,6 +12,7 @@ struct NotchMusicView: View {
     @ObservedObject private var features = FeatureRuntime.shared
     @AppStorage(DefaultsKey.notchLyricsEnabled) private var lyricsEnabled = true
     @AppStorage(DefaultsKey.notchQueueEnabled) private var queueEnabled = true
+    @AppStorage(DefaultsKey.notchIncludeOtherPlayers) private var includeOtherPlayers = false
     @State private var extra: MusicExtra?
     private enum MusicExtra { case lyrics, queue }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -214,6 +215,10 @@ struct NotchMusicView: View {
                     } else { Text(title) }
                 }
             }
+            Divider()
+            // Automatic follows only music apps unless this is on. A browser
+            // playing music is listed here, so the same setting sits beside it.
+            Toggle(extras.includeOtherPlayers, isOn: $includeOtherPlayers)
         } label: {
             Text(name).lineLimit(1).truncationMode(.tail)
         }
