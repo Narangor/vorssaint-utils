@@ -66,7 +66,6 @@ struct NotchMusicView: View {
                 HStack(spacing: 6) {
                     if AppFeature.mixer.isAvailable { NotchAudioControls(style: .inline) }
                     Spacer(minLength: 16)
-                    if !preview, service.playback != nil, shuffle.isOffered { shuffleButton }
                     if showsLyrics {
                         extraButton(.lyrics, title: FeatureStrings.notchMusicExtras(l10n.language).lyrics, symbol: "quote.bubble")
                     }
@@ -144,11 +143,11 @@ struct NotchMusicView: View {
 
     /// The player's own shuffle switch. A player not yet allowed to be
     /// controlled asks for that first, as the playback buttons do.
-    private var shuffleButton: some View {
+    private func shuffleButton(compact: Bool) -> some View {
         let strings = FeatureStrings.notchMusicExtras(l10n.language)
         let consent = shuffle.availability?.access == .consent
-        return NotchIconButton(symbol: "shuffle", title: consent ? strings.allowPlayback : strings.shuffle,
-                               selected: shuffle.enabled == true) { shuffle.toggle() }
+        return NotchMusicSideButton(symbol: "shuffle", title: consent ? strings.allowPlayback : strings.shuffle,
+                                    active: shuffle.enabled == true, tint: accent, compact: compact) { shuffle.toggle() }
             .disabled(shuffle.pending || shuffle.requestingAccess || !shuffle.allowed)
     }
 
@@ -205,7 +204,17 @@ struct NotchMusicView: View {
                 }
             }
             if timeline { NotchMusicTimeline(playback: playback, service: service, tint: accent, timesBeside: true) }
-            NotchMusicTransport(playback: playback, compact: !roomy).frame(maxWidth: .infinity)
+            // Shuffle sits beside the transport as one more of its buttons,
+            // spaced like them. The other side keeps its room while it shows,
+            // so the transport stays centred.
+            let showsShuffle = !preview && shuffle.isOffered
+            let side: CGFloat = roomy ? 44 : 36
+            HStack(spacing: roomy ? 18 : 12) {
+                if showsShuffle { shuffleButton(compact: !roomy).frame(width: side, height: side) }
+                NotchMusicTransport(playback: playback, compact: !roomy).fixedSize()
+                if showsShuffle { Color.clear.frame(width: side, height: side) }
+            }
+            .frame(maxWidth: .infinity)
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -243,6 +252,36 @@ struct NotchMusicView: View {
         .accessibilityValue([service.sourceIsAutomatic ? extras.automaticSource : nil,
                              playback == nil ? nil : name].compactMap { $0 }.joined(separator: ", "))
         .help(extras.playbackSource)
+    }
+}
+
+/// A switch beside the transport, drawn like its buttons: a white glyph
+/// with no plate, in the timeline's colour while it is on.
+private struct NotchMusicSideButton: View {
+    let symbol: String
+    let title: String
+    let active: Bool
+    let tint: Color
+    var compact = false
+    let action: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private var height: CGFloat { compact ? 36 : 44 }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: compact ? 14 : 16, weight: .semibold))
+                .foregroundStyle(active ? tint : .white.opacity(isEnabled ? 0.75 : 0.3))
+                .contentTransition(.symbolEffect(.replace))
+                .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: active)
+                .frame(width: height, height: height)
+                .contentShape(Circle())
+        }
+        .buttonStyle(NotchButtonStyle(cornerRadius: height / 2))
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(active ? .isSelected : [])
     }
 }
 
