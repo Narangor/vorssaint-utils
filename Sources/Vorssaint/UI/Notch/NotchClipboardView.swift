@@ -29,6 +29,10 @@ struct NotchClipboardView: View {
     @State private var hoveredID: UUID?
     @State private var expandedID: UUID?
     @State private var dwellTask: Task<Void, Never>?
+    @State private var collapseTask: Task<Void, Never>?
+    /// The entry the arrow keys have rested on long enough to open, once they have moved.
+    @State private var keyExpandedID: UUID?
+    @State private var keysMoved = false
     @Environment(\.notchSettingsPreview) private var preview
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var text: ClipboardFeatureStrings { FeatureStrings.clipboard(l10n.language) }
@@ -84,14 +88,22 @@ struct NotchClipboardView: View {
                         LazyVStack(spacing: 8) {
                             ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                                 card(entry, place: index)
-                                    .frame(height: isExpanded(entry) ? NotchLayout.clipboardCardHeight : NotchLayout.clipboardCompactCardHeight)
+                                    .frame(height: cardHeight(entry))
                                     .onHover { hover(entry, $0) }
                                     .id(entry.id)
                             }
                         }
                     }
                     .scrollIndicators(.automatic)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: expandedID)
+                    // An entry that opens may reach past the edge of the list.
+                    .onChange(of: openedID) { _, id in
+                        guard let id else { return }
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(220))
+                            guard openedID == id else { return }
+                            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(id) }
+                        }
+                    }
                     .onChange(of: highlightedID) { _, id in
                         guard let id else { return }
                         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(id) }
@@ -108,7 +120,15 @@ struct NotchClipboardView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         // A new search starts from its top result instead of a row it hid,
         // and a row that leaves the list hands the highlight on the same way.
-        .onChange(of: query) { _, _ in highlightedID = searchHighlight(keeping: nil) }
+        .onChange(of: query) { _, _ in keysMoved = false; highlightedID = searchHighlight(keeping: nil) }
+        // Resting on an entry with the arrow keys opens it, as resting the pointer does.
+        .task(id: highlightedID) {
+            keyExpandedID = nil
+            guard !preview, !comfortable, keysMoved, let id = highlightedID else { return }
+            try? await Task.sleep(for: .seconds(NotchClipboardCardSize.dwell))
+            guard !Task.isCancelled else { return }
+            setOpen(keyID: id)
+        }
         .onChange(of: pinnedOnly) { _, _ in highlightedID = searchHighlight(keeping: nil) }
         .onChange(of: searchOpen) { _, open in
             guard !preview else { return }
@@ -141,22 +161,63 @@ struct NotchClipboardView: View {
 
     private var comfortable: Bool { cardSize == NotchClipboardCardSize.comfortable.rawValue }
 
-    private func isExpanded(_ entry: ClipboardHistoryEntry) -> Bool { comfortable || expandedID == entry.id }
+    private func isExpanded(_ entry: ClipboardHistoryEntry) -> Bool {
+        comfortable || expandedID == entry.id || keyExpandedID == entry.id
+    }
 
-    /// A compact entry opens once the pointer has rested on it, and closes when it leaves.
+    /// The entry that is open, by the pointer or by the keys.
+    private var openedID: UUID? { expandedID ?? keyExpandedID }
+
+    /// A comfortable entry is always the same height; a compact one is short until it opens
+    /// and then as tall as its text or image asks.
+    private func cardHeight(_ entry: ClipboardHistoryEntry) -> CGFloat {
+        if comfortable { return NotchLayout.clipboardCardHeight }
+        guard isExpanded(entry) else { return NotchLayout.clipboardCompactCardHeight }
+        let width = size.width - 40
+        switch entry.kind {
+        case .text:
+            return max(NotchLayout.clipboardCompactCardHeight, NotchClipboardCardSize.openHeight(text: openText(entry), width: width))
+        case .image:
+            return NotchClipboardCardSize.openHeight(aspectRatio: entry.imageAspectRatio.map { CGFloat($0) }, width: width)
+        case .files:
+            return NotchLayout.clipboardCardHeight
+        }
+    }
+
+    /// The text an open entry shows: its own line breaks, and no more than a few lines of it.
+    private func openText(_ entry: ClipboardHistoryEntry) -> String {
+        String(entry.text.prefix(NotchClipboardCardSize.maximumOpenLines * 120))
+    }
+
+    private func setOpen(keyID: UUID?) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { keyExpandedID = keyID }
+    }
+
+    /// A compact entry opens once the pointer has rested on it. Leaving closes it after a
+    /// moment, so the pointer crossing the card as it changes shape does not close it.
     private func hover(_ entry: ClipboardHistoryEntry, _ inside: Bool) {
         guard !preview, !comfortable else { return }
-        dwellTask?.cancel()
         if inside {
+            collapseTask?.cancel()
+            dwellTask?.cancel()
             hoveredID = entry.id
+            guard expandedID != entry.id else { return }
             dwellTask = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(NotchClipboardCardSize.dwell))
-                guard !Task.isCancelled else { return }
-                expandedID = entry.id
+                guard !Task.isCancelled, hoveredID == entry.id else { return }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { expandedID = entry.id }
             }
         } else {
-            if hoveredID == entry.id { hoveredID = nil }
-            if expandedID == entry.id { expandedID = nil }
+            dwellTask?.cancel()
+            collapseTask?.cancel()
+            collapseTask = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled else { return }
+                if hoveredID == entry.id { hoveredID = nil }
+                if expandedID == entry.id {
+                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { expandedID = nil }
+                }
+            }
         }
     }
 
@@ -224,7 +285,7 @@ struct NotchClipboardView: View {
     private func expandedCard(_ entry: ClipboardHistoryEntry, place: Int) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Button { activate(entry) } label: {
-                preview(entry, compact: false)
+                preview(entry, compact: false, open: !comfortable)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .clipped()
                     .contentShape(Rectangle())
@@ -362,6 +423,7 @@ struct NotchClipboardView: View {
         switch key {
         case .move(let backwards):
             guard !ids.isEmpty else { return false }
+            keysMoved = true
             highlightedID = NotchSupport.steppedItem(from: highlightedID, in: ids, backwards: backwards)
             return true
         case .paste:
@@ -409,7 +471,7 @@ struct NotchClipboardView: View {
         history.remove(entry)
     }
 
-    @ViewBuilder private func preview(_ entry: ClipboardHistoryEntry, compact: Bool) -> some View {
+    @ViewBuilder private func preview(_ entry: ClipboardHistoryEntry, compact: Bool, open: Bool = false) -> some View {
         switch entry.kind {
         case .image:
             if let name = entry.imageFile {
@@ -456,9 +518,9 @@ struct NotchClipboardView: View {
                     ColorSwatch(color: color, size: 12)
                         .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                 }
-                searchText(entry.preview, matching: searchTokens)
+                searchText(open ? openText(entry) : entry.preview, matching: searchTokens)
                     .font(.system(size: 12))
-                    .lineLimit(compact ? 2 : 3)
+                    .lineLimit(compact ? 2 : open ? NotchClipboardCardSize.maximumOpenLines : 3)
                     .multilineTextAlignment(.leading)
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)

@@ -19,6 +19,33 @@ enum NotchClipboardCardSize: String, CaseIterable, Identifiable {
     /// How long the pointer rests on a compact entry before it opens.
     static let dwell: TimeInterval = 0.7
 
+    /// An entry opened to show its text goes up to this many lines, then ends in an ellipsis.
+    static let maximumOpenLines = 8
+    static let openLineHeight: CGFloat = 16
+    /// What an open entry needs besides its content: padding, spacing and the row of actions.
+    static let openChrome: CGFloat = 48
+    static let maximumOpenImage: CGFloat = 170
+    static let minimumOpenImage: CGFloat = 80
+
+    /// Lines the text takes at 12 points in `width`, counting each paragraph on its own.
+    static func openLines(for text: String, width: CGFloat) -> Int {
+        let perLine = max(8, Int(width / 6.4))
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            .reduce(0) { $0 + max(1, ($1.count + perLine - 1) / perLine) }
+        return min(maximumOpenLines, max(1, lines))
+    }
+
+    /// The height of an open text entry, which shows as much of it as fits in a few lines.
+    static func openHeight(text: String, width: CGFloat) -> CGFloat {
+        CGFloat(openLines(for: text, width: width)) * openLineHeight + openChrome
+    }
+
+    /// The height of an open image entry: the image at its own proportions, within a range.
+    static func openHeight(aspectRatio: CGFloat?, width: CGFloat) -> CGFloat {
+        let natural = max(1, width) / max(0.2, aspectRatio ?? 1.5)
+        return min(maximumOpenImage, max(minimumOpenImage, natural)) + openChrome
+    }
+
     static func current(in defaults: UserDefaults = .standard) -> NotchClipboardCardSize {
         NotchClipboardCardSize(rawValue: defaults.string(forKey: DefaultsKey.notchClipboardCardSize) ?? "") ?? .compact
     }
