@@ -89,6 +89,11 @@ struct NotchMusicView: View {
             syncExtras()
             if !preview { shuffle.refresh(for: service.playback) }
         }
+        // Shuffle and the playback buttons share one consent, so a grant
+        // through the playback buttons also shows on shuffle.
+        .onChange(of: service.automationAvailability?.access) { old, new in
+            if !preview, old != nil, new != nil { shuffle.refresh(for: service.playback) }
+        }
         .onChange(of: features.revision) { syncExtras() }
         .onChange(of: lyricsEnabled) { syncExtras() }
         .onChange(of: queueEnabled) { syncExtras() }
@@ -146,9 +151,9 @@ struct NotchMusicView: View {
     private func shuffleButton(compact: Bool) -> some View {
         let strings = FeatureStrings.notchMusicExtras(l10n.language)
         let consent = shuffle.availability?.access == .consent
-        return NotchMusicSideButton(symbol: "shuffle", title: consent ? strings.allowPlayback : strings.shuffle,
+        return NotchMusicSideButton(symbol: "shuffle", title: strings.shuffle, hint: consent ? strings.allowPlayback : nil,
                                     active: shuffle.enabled == true, tint: accent, compact: compact) { shuffle.toggle() }
-            .disabled(shuffle.pending || shuffle.requestingAccess || !shuffle.allowed)
+            .disabled(shuffle.requestingAccess || !shuffle.allowed)
     }
 
     /// The artwork fills the row; the details beside it drop their artist
@@ -204,17 +209,24 @@ struct NotchMusicView: View {
                 }
             }
             if timeline { NotchMusicTimeline(playback: playback, service: service, tint: accent, timesBeside: true) }
-            // Shuffle sits beside the transport as one more of its buttons,
-            // spaced like them. The other side keeps its room while it shows,
-            // so the transport stays centred.
-            let showsShuffle = !preview && shuffle.isOffered
-            let side: CGFloat = roomy ? 44 : 36
-            HStack(spacing: roomy ? 18 : 12) {
-                if showsShuffle { shuffleButton(compact: !roomy).frame(width: side, height: side) }
-                NotchMusicTransport(playback: playback, compact: !roomy).fixedSize()
-                if showsShuffle { Color.clear.frame(width: side, height: side) }
+            if !preview && shuffle.isOffered {
+                // Shuffle sits beside the transport as one more of its buttons,
+                // spaced like them. The other side keeps its room while it
+                // shows, so the transport stays centred. A column too narrow
+                // for the row keeps the plain transport.
+                let side: CGFloat = roomy ? 44 : 36
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: roomy ? 18 : 12) {
+                        shuffleButton(compact: !roomy).frame(width: side, height: side)
+                        NotchMusicTransport(playback: playback, compact: !roomy).fixedSize()
+                        Color.clear.frame(width: side, height: side)
+                    }
+                    NotchMusicTransport(playback: playback, compact: !roomy)
+                }
+                .frame(maxWidth: .infinity)
+            } else {
+                NotchMusicTransport(playback: playback, compact: !roomy).frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -255,11 +267,15 @@ struct NotchMusicView: View {
     }
 }
 
-/// A switch beside the transport, drawn like its buttons: a white glyph
-/// with no plate, in the timeline's colour while it is on.
+/// A switch beside the transport, drawn like its buttons: a dimmed glyph
+/// with no plate while it is off. On, it takes the timeline's colour on the
+/// faint plate the island's other toggles use, which still reads where a
+/// neutral cover leaves that colour white.
 private struct NotchMusicSideButton: View {
     let symbol: String
     let title: String
+    /// What a press does first when that is not switching, as asking for consent.
+    var hint: String?
     let active: Bool
     let tint: Color
     var compact = false
@@ -267,20 +283,24 @@ private struct NotchMusicSideButton: View {
     @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var height: CGFloat { compact ? 36 : 44 }
+    private var plate: CGFloat { compact ? 28 : 32 }
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol)
                 .font(.system(size: compact ? 14 : 16, weight: .semibold))
-                .foregroundStyle(active ? tint : .white.opacity(isEnabled ? 0.75 : 0.3))
+                .foregroundStyle(active ? tint : .white.opacity(isEnabled ? 0.55 : 0.3))
                 .contentTransition(.symbolEffect(.replace))
+                .frame(width: plate, height: plate)
+                .background(.white.opacity(active ? 0.12 : 0), in: Circle())
                 .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: active)
                 .frame(width: height, height: height)
                 .contentShape(Circle())
         }
         .buttonStyle(NotchButtonStyle(cornerRadius: height / 2))
-        .help(title)
+        .help(hint ?? title)
         .accessibilityLabel(title)
+        .accessibilityHint(hint ?? "")
         .accessibilityAddTraits(active ? .isSelected : [])
     }
 }

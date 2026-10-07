@@ -96,7 +96,7 @@ enum NotchMusicAutomation {
     }
 
     /// False only when the player says the songs playing cannot be shuffled,
-    /// as Spotify does for a radio. A player that does not say, or cannot be
+    /// as some do for a radio. A player that does not say, or cannot be
     /// asked before consent, keeps the button that asks for it.
     static func shuffleAllowed(by availability: Availability) -> Bool {
         guard availability.capabilities.shuffleAllowed != nil else { return true }

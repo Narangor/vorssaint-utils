@@ -12,7 +12,7 @@ struct NotchMusicAutomationCapabilities: Equatable {
     var position: Position?
     /// The player's own shuffle switch, a writable Boolean of the application.
     var shuffle: UInt32?
-    /// Spotify's read-only answer to whether the songs playing can be
+    /// Some players' read-only answer to whether the songs playing can be
     /// shuffled at all. Players that do not declare it always can.
     var shuffleAllowed: UInt32?
 
@@ -56,7 +56,7 @@ struct NotchMusicAutomationCapabilities: Equatable {
         parser.externalEntityResolvingPolicy = .never
         parser.delegate = reader
         guard parser.parse(), reader.isDictionary,
-              !reader.result.commands.isEmpty || reader.result.position != nil || reader.result.shuffle != nil else { return nil }
+              !reader.result.commands.isEmpty || reader.result.position != nil else { return nil }
         return reader.result
     }
 }
@@ -73,8 +73,8 @@ private final class MusicDictionaryReader: NSObject, XMLParserDelegate {
     private var seenShuffle = false
     private var seenShuffleAllowed = false
     private let names: Set<String> = ["playpause", "play", "pause", "next track", "previous track"]
-    /// Spotify calls it "shuffling" and Music "shuffle enabled". Spotify's
-    /// read-only "shuffling enabled" says whether shuffle is offered at all.
+    /// Players call it "shuffling" or "shuffle enabled". A read-only
+    /// "shuffling enabled" says whether shuffle is offered at all.
     private let shuffleNames: Set<String> = ["shuffling", "shuffle enabled"]
 
     private func code(_ value: String?) -> UInt32? {
