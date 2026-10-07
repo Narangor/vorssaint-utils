@@ -4,6 +4,34 @@
 import Foundation
 
 enum NotchMusicExtrasTests {
+    private static func preferredPlayer(_ suite: TestSuite) {
+        typealias Player = NotchPreferredPlayer
+        let spotify = "com.spotify.client", music = "com.apple.Music", other = "org.example.Player"
+        func resolve(_ choice: String, last: String? = nil, installed: Set<String>) -> String? {
+            Player.resolve(choice: choice, lastPlayed: last, isInstalled: installed.contains)
+        }
+        suite.expect(resolve(other, last: spotify, installed: [other, spotify, music]) == other,
+                     "a player chosen in Settings is the one that opens, whatever played last")
+        suite.expect(resolve(Player.automatic, last: music, installed: [spotify, music]) == music,
+                     "automatic opens the music app that played last")
+        suite.expect(resolve(Player.automatic, installed: [spotify, music]) == spotify
+                     && resolve(Player.automatic, installed: [music]) == music,
+                     "with nothing played yet, automatic prefers Spotify and then Apple Music")
+        suite.expect(resolve(other, installed: [music]) == music && resolve(Player.automatic, last: other, installed: [spotify]) == spotify,
+                     "a chosen or last player that is no longer installed gives way to the automatic order")
+        suite.expect(resolve(Player.automatic, last: spotify, installed: []) == nil && resolve(other, installed: []) == nil,
+                     "with no music app installed nothing is offered to open")
+        let domain = "com.vorssaint.tests.notch-preferred-player"
+        let defaults = UserDefaults(suiteName: domain)!
+        defaults.removePersistentDomain(forName: domain)
+        defer { defaults.removePersistentDomain(forName: domain) }
+        suite.expect(Player.choice(in: defaults) == Player.automatic, "the choice starts as automatic")
+        defaults.set(spotify, forKey: DefaultsKey.notchPreferredPlayer)
+        suite.expect(Player.choice(in: defaults) == spotify, "the choice is the stored bundle identifier")
+        defaults.set(String(repeating: "x", count: 300), forKey: DefaultsKey.notchPreferredPlayer)
+        suite.expect(Player.choice(in: defaults) == Player.automatic, "an implausible stored value is treated as automatic")
+    }
+
     private static func lyricScheduleContracts(_ suite: TestSuite) {
         let track = RadialNowPlayingSnapshot(title: "Timed verses", artist: nil, album: nil,
                                             artworkData: nil, appBundleIdentifier: nil, appPID: nil)
@@ -54,6 +82,7 @@ enum NotchMusicExtrasTests {
     }
 
     static func run(_ suite: TestSuite) {
+        preferredPlayer(suite)
         lyricScheduleContracts(suite)
         NotchMusicHardeningTests.run(suite)
         let track = RadialNowPlayingSnapshot(title: "A & B + C", artist: "Artist / Example", album: "Studio Recording",
@@ -326,7 +355,7 @@ enum NotchMusicExtrasTests {
                "music feature choices and online consent are accounted for by settings backup")
         for language in AppLanguage.allCases {
             let strings = Mirror(reflecting: FeatureStrings.notchMusicExtras(language)).children.compactMap { $0.value as? String }
-            suite.expect(strings.count == 39 && strings.allSatisfy { !$0.isEmpty && !$0.contains("—") },
+            suite.expect(strings.count == 42 && strings.allSatisfy { !$0.isEmpty && !$0.contains("—") },
                    "music extras have complete user-facing strings in \(language.rawValue)")
         }
     }
