@@ -15,7 +15,10 @@ struct NotchClipboardView: View {
     @AppStorage(DefaultsKey.clipboardHistoryEnabled) private var enabled = false
     @State private var query = ""
     @State private var copiedID: UUID?
-    @State private var pinnedOnly = false
+    private var pinnedOnly: Bool {
+        get { service.clipboardPinnedOnly }
+        nonmutating set { service.clipboardPinnedOnly = newValue }
+    }
     /// The card the arrow keys chose from the search field, or the top result
     /// of a typed search; Return uses it the way a click would.
     @State private var highlightedID: UUID?
@@ -23,7 +26,6 @@ struct NotchClipboardView: View {
     /// The search field shows only once it is wanted: the magnifier opens it,
     /// pointing at the magnifier opens it, and so does typing a letter.
     @State private var searchOpen = false
-    @State private var hoveringSearch = false
     @AppStorage(DefaultsKey.notchClipboardCardSize) private var cardSize = NotchClipboardCardSize.compact.rawValue
     /// The entry under the pointer, and the one it has rested on long enough to open.
     @State private var hoveredID: UUID?
@@ -57,15 +59,6 @@ struct NotchClipboardView: View {
     var body: some View {
         VStack(spacing: NotchLayout.rowSpacing) {
             header
-                .background {
-                    if !preview {
-                        ClipboardKeyMonitor { handleKey(keyCode: $0, characters: $1, hasCommandModifier: $2, editing: $3) }
-                            .frame(width: 0, height: 0)
-                    }
-                }
-                // The page opens on the entry copied last, so Return pastes it
-                // and the arrows move from it.
-                .onAppear { if !preview { highlightedID = searchHighlight(keeping: nil) } }
             if !enabled, history.entries.isEmpty {
                 // The panel offers the switch beside its caption; the page
                 // says why it is empty and turns the history on from here.
@@ -129,6 +122,16 @@ struct NotchClipboardView: View {
             guard !Task.isCancelled else { return }
             setOpen(keyID: id)
         }
+        .background {
+            if !preview {
+                ClipboardKeyMonitor { handleKey(keyCode: $0, characters: $1, hasCommandModifier: $2, editing: $3) }
+                    .frame(width: 0, height: 0)
+            }
+        }
+        // The page opens on the entry copied last, so Return pastes it
+        // and the arrows move from it.
+        .onAppear { if !preview { highlightedID = searchHighlight(keeping: nil) } }
+        .onChange(of: service.clipboardSearchRequest) { _, _ in if !preview { openSearch() } }
         .onChange(of: pinnedOnly) { _, _ in highlightedID = searchHighlight(keeping: nil) }
         .onChange(of: searchOpen) { _, open in
             guard !preview else { return }
@@ -357,8 +360,8 @@ struct NotchClipboardView: View {
             ?? NotchSupport.restingClipboardHighlight(entries.map { ($0.id, $0.isPinned) })
     }
 
-    /// The row of actions. The search field is behind the magnifier until it
-    /// is wanted, so the page keeps its room for the entries.
+    /// The search field, once the header's magnifier or a typed letter opens
+    /// it; until then the page keeps all its room for the entries.
     @ViewBuilder private var header: some View {
         if searchOpen {
             HStack(spacing: 8) {
@@ -367,7 +370,6 @@ struct NotchClipboardView: View {
                     .font(.system(size: 12))
                     .focused($searching)
                     .accessibilityLabel(text.search)
-                actionButtons
             }
             .padding(.horizontal, 12)
             .frame(height: NotchLayout.clipboardSearchHeight)
@@ -378,40 +380,6 @@ struct NotchClipboardView: View {
                     .allowsHitTesting(false)
             }
             .animation(.easeOut(duration: 0.15), value: searching)
-        } else {
-            HStack(spacing: 8) {
-                NotchIconButton(symbol: "magnifyingglass", title: text.search) { openSearch() }
-                    .onHover { hoveringSearch = $0 }
-                    .task(id: hoveringSearch) {
-                        guard hoveringSearch, !preview else { return }
-                        try? await Task.sleep(for: .milliseconds(250))
-                        if !Task.isCancelled { openSearch() }
-                    }
-                Spacer(minLength: 0)
-                actionButtons
-            }
-            .frame(height: NotchLayout.clipboardActionsHeight)
-        }
-    }
-
-    @ViewBuilder private var actionButtons: some View {
-        NotchIconButton(symbol: "pin", title: text.pinned, selected: pinnedOnly) {
-            pinnedOnly.toggle()
-        }
-        NotchIconButton(symbol: "trash", title: text.clearRecent) {
-            let ids = history.recentEntriesSnapshot
-            DispatchQueue.main.async {
-                guard NSAlert.confirmAboveIsland(String(format: text.clearRecentConfirmFormat, ids.count),
-                                                 message: text.clearRecentConfirmMessage,
-                                                 action: text.clearRecent, destructive: true,
-                                                 cancel: text.cancel) else { return }
-                history.clearRecent(ids)
-                copiedID = nil
-            }
-        }
-        .disabled(history.recentEntries.isEmpty)
-        NotchIconButton(symbol: "arrow.up.forward.app", title: text.title) {
-            service.perform { history.showHistoryWindow(preferNotch: false) }
         }
     }
 
@@ -609,5 +577,34 @@ private enum ClipboardSourceApps {
         let app = App(name: InstalledApps.name(for: bundleID), icon: NSWorkspace.shared.icon(forFile: url.path))
         cache[bundleID] = app
         return app
+    }
+}
+
+/// The filter, the clearing of recent entries and the history window, which
+/// sit in the island's header beside its other actions.
+struct NotchClipboardHeaderActions: View {
+    @ObservedObject var service: NotchService
+    @ObservedObject private var history = ClipboardHistoryService.shared
+    @ObservedObject private var l10n = L10n.shared
+    private var text: ClipboardFeatureStrings { FeatureStrings.clipboard(l10n.language) }
+
+    var body: some View {
+        NotchIconButton(symbol: "pin", title: text.pinned, selected: service.clipboardPinnedOnly) {
+            service.clipboardPinnedOnly.toggle()
+        }
+        NotchIconButton(symbol: "trash", title: text.clearRecent) {
+            let ids = history.recentEntriesSnapshot
+            DispatchQueue.main.async {
+                guard NSAlert.confirmAboveIsland(String(format: text.clearRecentConfirmFormat, ids.count),
+                                                 message: text.clearRecentConfirmMessage,
+                                                 action: text.clearRecent, destructive: true,
+                                                 cancel: text.cancel) else { return }
+                history.clearRecent(ids)
+            }
+        }
+        .disabled(history.recentEntries.isEmpty)
+        NotchIconButton(symbol: "arrow.up.forward.app", title: text.title) {
+            service.perform { history.showHistoryWindow(preferNotch: false) }
+        }
     }
 }
