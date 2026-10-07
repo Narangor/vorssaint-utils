@@ -24,6 +24,11 @@ struct NotchClipboardView: View {
     /// pointing at the magnifier opens it, and so does typing a letter.
     @State private var searchOpen = false
     @State private var hoveringSearch = false
+    @AppStorage(DefaultsKey.notchClipboardCardSize) private var cardSize = NotchClipboardCardSize.compact.rawValue
+    /// The entry under the pointer, and the one it has rested on long enough to open.
+    @State private var hoveredID: UUID?
+    @State private var expandedID: UUID?
+    @State private var dwellTask: Task<Void, Never>?
     @Environment(\.notchSettingsPreview) private var preview
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var text: ClipboardFeatureStrings { FeatureStrings.clipboard(l10n.language) }
@@ -78,12 +83,15 @@ struct NotchClipboardView: View {
                     ScrollView {
                         LazyVStack(spacing: 8) {
                             ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                                card(entry, place: index).frame(height: NotchLayout.clipboardCardHeight)
+                                card(entry, place: index)
+                                    .frame(height: isExpanded(entry) ? NotchLayout.clipboardCardHeight : NotchLayout.clipboardCompactCardHeight)
+                                    .onHover { hover(entry, $0) }
                                     .id(entry.id)
                             }
                         }
                     }
                     .scrollIndicators(.automatic)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: expandedID)
                     .onChange(of: highlightedID) { _, id in
                         guard let id else { return }
                         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(id) }
@@ -131,11 +139,92 @@ struct NotchClipboardView: View {
         }
     }
 
-    /// The entry fills the card; its actions sit in the bottom row.
+    private var comfortable: Bool { cardSize == NotchClipboardCardSize.comfortable.rawValue }
+
+    private func isExpanded(_ entry: ClipboardHistoryEntry) -> Bool { comfortable || expandedID == entry.id }
+
+    /// A compact entry opens once the pointer has rested on it, and closes when it leaves.
+    private func hover(_ entry: ClipboardHistoryEntry, _ inside: Bool) {
+        guard !preview, !comfortable else { return }
+        dwellTask?.cancel()
+        if inside {
+            hoveredID = entry.id
+            dwellTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(NotchClipboardCardSize.dwell))
+                guard !Task.isCancelled else { return }
+                expandedID = entry.id
+            }
+        } else {
+            if hoveredID == entry.id { hoveredID = nil }
+            if expandedID == entry.id { expandedID = nil }
+        }
+    }
+
+    private func kindSymbol(_ entry: ClipboardHistoryEntry) -> String {
+        entry.kind == .image ? "photo" : entry.kind == .files ? "doc" : "text.alignleft"
+    }
+
     private func card(_ entry: ClipboardHistoryEntry, place: Int) -> some View {
+        Group {
+            if isExpanded(entry) { expandedCard(entry, place: place) } else { compactCard(entry, place: place) }
+        }
+        .modifier(NotchControlSurface(cornerRadius: 14, selected: entry.isPinned))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(.white.opacity(highlightedID == entry.id ? 0.34 : 0), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .clipped()
+        .contextMenu { actions(entry) }
+        .accessibilityAction(named: Text(text.moveUp)) { move(entry, .up) }
+        .accessibilityAction(named: Text(text.moveDown)) { move(entry, .down) }
+    }
+
+    /// One or two lines, with the actions shown only for the entry in use.
+    private func compactCard(_ entry: ClipboardHistoryEntry, place: Int) -> some View {
+        let active = hoveredID == entry.id || highlightedID == entry.id
+        return HStack(spacing: 8) {
+            Button { activate(entry) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: kindSymbol(entry)).font(.system(size: 10)).foregroundStyle(.secondary)
+                    preview(entry, compact: true)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .clipped()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(NotchButtonStyle(lifts: false))
+            .help(permissions.accessibility ? text.clickRowShortcut : text.copy)
+            if active {
+                HStack(spacing: 2) {
+                    if entry.kind == .image, AppFeature.screenshot.isAvailable {
+                        NotchIconButton(symbol: "pencil", title: text.edit) { history.editImage(entry) }
+                    }
+                    NotchIconButton(symbol: copiedID == entry.id ? "checkmark" : "doc.on.doc",
+                                    title: copiedID == entry.id ? text.copied : text.copy) { copy(entry) }
+                    NotchIconButton(symbol: entry.isPinned ? "pin.fill" : "pin",
+                                    title: entry.isPinned ? text.unpin : text.pin) { history.togglePin(entry) }
+                    NotchIconButton(symbol: "trash", title: text.delete) { remove(entry) }
+                }
+            } else {
+                HStack(spacing: 6) {
+                    if entry.isPinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(.secondary) }
+                    if place < 9, service.panelIsKey {
+                        Text("⌘\(place + 1)").font(.system(size: 9.5, weight: .medium)).monospacedDigit()
+                            .foregroundStyle(.tertiary).accessibilityHidden(true)
+                    }
+                    Text(entry.copiedAt, style: .time).font(.system(size: 9.5)).foregroundStyle(.tertiary).lineLimit(1)
+                }
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
+    /// The whole entry, with its actions in the bottom row.
+    private func expandedCard(_ entry: ClipboardHistoryEntry, place: Int) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Button { activate(entry) } label: {
-                preview(entry)
+                preview(entry, compact: false)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .clipped()
                     .contentShape(Rectangle())
@@ -143,7 +232,7 @@ struct NotchClipboardView: View {
             .buttonStyle(NotchButtonStyle(lifts: false))
             .help(permissions.accessibility ? text.clickRowShortcut : text.copy)
             HStack(spacing: 4) {
-                Image(systemName: entry.kind == .image ? "photo" : entry.kind == .files ? "doc" : "text.alignleft")
+                Image(systemName: kindSymbol(entry))
                     .font(.system(size: 10)).foregroundStyle(.secondary)
                 Text(entry.copiedAt, style: .time)
                     .font(.system(size: 9.5)).foregroundStyle(.tertiary).lineLimit(1)
@@ -168,16 +257,6 @@ struct NotchClipboardView: View {
             .frame(height: 28)
         }
         .padding(.horizontal, 10).padding(.top, 10).padding(.bottom, 4)
-        .modifier(NotchControlSurface(cornerRadius: 14, selected: entry.isPinned))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(.white.opacity(highlightedID == entry.id ? 0.34 : 0), lineWidth: 1)
-                .allowsHitTesting(false)
-        }
-        .clipped()
-        .contextMenu { actions(entry) }
-        .accessibilityAction(named: Text(text.moveUp)) { move(entry, .up) }
-        .accessibilityAction(named: Text(text.moveDown)) { move(entry, .down) }
     }
 
     /// The quick panel's row menu: paste when the app may type, copy, pin,
@@ -330,14 +409,14 @@ struct NotchClipboardView: View {
         history.remove(entry)
     }
 
-    @ViewBuilder private func preview(_ entry: ClipboardHistoryEntry) -> some View {
+    @ViewBuilder private func preview(_ entry: ClipboardHistoryEntry, compact: Bool) -> some View {
         switch entry.kind {
         case .image:
             if let name = entry.imageFile {
                 ClipboardThumbnailImage(source: .stored(name: name),
                                         aspectRatio: entry.imageAspectRatio,
                                         failureText: "\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: compact ? 72 : .infinity, maxHeight: .infinity, alignment: compact ? .leading : .topLeading)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .help("\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
             } else {
@@ -352,7 +431,7 @@ struct NotchClipboardView: View {
                ClipboardImageStore.isImageFile(atPath: path) {
                 ClipboardThumbnailImage(source: .file(path: path),
                                         failureText: entry.fileNames.first ?? entry.preview)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: compact ? 72 : .infinity, maxHeight: .infinity, alignment: compact ? .leading : .topLeading)
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .help(path)
             } else {
@@ -366,7 +445,7 @@ struct NotchClipboardView: View {
                     Image(systemName: "folder")
                 }
                 .font(.system(size: 12))
-                .lineLimit(2)
+                .lineLimit(compact ? 1 : 2)
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
                 .help(entry.filePaths.joined(separator: "\n"))
@@ -379,7 +458,7 @@ struct NotchClipboardView: View {
                 }
                 searchText(entry.preview, matching: searchTokens)
                     .font(.system(size: 12))
-                    .lineLimit(3)
+                    .lineLimit(compact ? 2 : 3)
                     .multilineTextAlignment(.leading)
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
