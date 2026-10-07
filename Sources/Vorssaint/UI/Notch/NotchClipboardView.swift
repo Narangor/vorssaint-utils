@@ -221,6 +221,20 @@ struct NotchClipboardView: View {
         }
     }
 
+    /// The icon of the app the entry was copied from, or the kind of entry when that is unknown.
+    @ViewBuilder private func sourceBadge(_ entry: ClipboardHistoryEntry) -> some View {
+        if let id = entry.sourceBundleID, let app = ClipboardSourceApps.app(for: id) {
+            Image(nsImage: app.icon)
+                .resizable().interpolation(.high)
+                .frame(width: 14, height: 14)
+                .help(app.name)
+                .accessibilityLabel(app.name)
+        } else {
+            Image(systemName: kindSymbol(entry))
+                .font(.system(size: 10)).foregroundStyle(.secondary)
+        }
+    }
+
     private func kindSymbol(_ entry: ClipboardHistoryEntry) -> String {
         entry.kind == .image ? "photo" : entry.kind == .files ? "doc" : "text.alignleft"
     }
@@ -292,10 +306,10 @@ struct NotchClipboardView: View {
             }
             .buttonStyle(NotchButtonStyle(lifts: false))
             .help(permissions.accessibility ? text.clickRowShortcut : text.copy)
-            HStack(spacing: 4) {
-                Image(systemName: kindSymbol(entry))
-                    .font(.system(size: 10)).foregroundStyle(.secondary)
-                Text(entry.copiedAt, style: .time)
+            HStack(spacing: 5) {
+                sourceBadge(entry)
+                Text(entry.copiedAt, format: .dateTime.month(.abbreviated).day().hour().minute())
+                    .environment(\.locale, l10n.language.formattingLocale())
                     .font(.system(size: 9.5)).foregroundStyle(.tertiary).lineLimit(1)
                 Spacer(minLength: 0)
                 if place < 9, service.panelIsKey {
@@ -578,5 +592,22 @@ private struct ClipboardKeyMonitor: NSViewRepresentable {
             NSEvent.removeMonitor(monitor)
             self.monitor = nil
         }
+    }
+}
+
+/// Name and icon of the apps entries were copied from, looked up once each. An
+/// app removed since the copy has nothing to show; a miss is not kept, so an app
+/// installed later shows up without a restart.
+@MainActor
+private enum ClipboardSourceApps {
+    struct App { let name: String; let icon: NSImage }
+    private static var cache: [String: App] = [:]
+
+    static func app(for bundleID: String) -> App? {
+        if let cached = cache[bundleID] { return cached }
+        guard let url = InstalledApps.url(for: bundleID) else { return nil }
+        let app = App(name: InstalledApps.name(for: bundleID), icon: NSWorkspace.shared.icon(forFile: url.path))
+        cache[bundleID] = app
+        return app
     }
 }
