@@ -1114,6 +1114,23 @@ enum NotchTests {
         suite.expect(NotchClipboardCardSize.current(in: sizeDefaults) == .comfortable, "the chosen entry size is read")
         sizeDefaults.set("huge", forKey: DefaultsKey.notchClipboardCardSize)
         suite.expect(NotchClipboardCardSize.current(in: sizeDefaults) == .compact, "an unknown entry size falls back to compact")
+        typealias Size = NotchClipboardCardSize
+        suite.expect(Size.openLines(for: "one line", width: 400) == 1
+                     && Size.openLines(for: "a\nb\nc", width: 400) == 3
+                     && Size.openLines(for: String(repeating: "x", count: 130), width: 400) == 3
+                     && Size.openLines(for: String(repeating: "word ", count: 1000), width: 400) == Size.maximumOpenLines
+                     && Size.openLines(for: "", width: 400) == 1,
+                     "an open entry shows its lines, counting wrapped ones, up to a limit")
+        suite.expect(Size.openHeight(text: "short", width: 400) == Size.openLineHeight + Size.openChrome
+                     && Size.openHeight(text: String(repeating: "x\n", count: 50), width: 400)
+                        == CGFloat(Size.maximumOpenLines) * Size.openLineHeight + Size.openChrome,
+                     "an open text entry is as tall as its lines, up to a limit")
+        suite.expect(Size.openHeight(aspectRatio: 1.6, width: 400) == Size.maximumOpenImage + Size.openChrome,
+                     "a wide image opens at the tallest it may")
+        suite.expect(Size.openHeight(aspectRatio: 20, width: 400) == Size.minimumOpenImage + Size.openChrome
+                     && Size.openHeight(aspectRatio: 1, width: 100) == 100 + Size.openChrome
+                     && Size.openHeight(aspectRatio: nil, width: 300) == Size.maximumOpenImage + Size.openChrome,
+                     "an open image keeps its proportions within a range, and one with none is taken as wide")
         suite.expect(NotchLayout.clipboardCompactCardHeight < NotchLayout.clipboardCardHeight && NotchClipboardCardSize.dwell > 0,
                      "a compact entry is shorter than an open one and opens after a pause")
         let domain = "com.vorssaint.tests.notch"
