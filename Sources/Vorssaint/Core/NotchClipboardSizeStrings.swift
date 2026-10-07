@@ -19,6 +19,10 @@ enum NotchClipboardCardSize: String, CaseIterable, Identifiable {
     /// How long the pointer rests on a compact entry before it opens.
     static let dwell: TimeInterval = 0.7
 
+    /// How long the arrow keys rest on a compact entry before it opens: longer
+    /// than the pointer, since keys cross many entries on their way.
+    static let keyDwell: TimeInterval = 1.4
+
     /// An entry opened to show its text goes up to this many lines, then ends in an ellipsis.
     static let maximumOpenLines = 8
     static let openLineHeight: CGFloat = 16
