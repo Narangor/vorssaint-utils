@@ -56,6 +56,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchBattery) private var battery = true
     @AppStorage(DefaultsKey.notchClipboard) private var clipboard = true
     @AppStorage(DefaultsKey.notchClipboardWindow) private var clipboardWindow = true
+    @AppStorage(DefaultsKey.notchClipboardCardSize) private var clipboardCardSize = NotchClipboardCardSize.compact.rawValue
     @AppStorage(DefaultsKey.screenshotDefaultAction) private var captureAction = ""
     @AppStorage(DefaultsKey.notchCapture) private var capture = true
     @AppStorage(DefaultsKey.notchTrackChange) private var trackChange = true
@@ -121,7 +122,7 @@ struct NotchSettings: View {
          String(hoverExpand), String(hideUntilHover), String(hideInFullscreen), String(coversMenus),
          display, silhouette, String(hover), hidden, order, String(volume), String(inputSource),
          String(brightness), String(keyboardLight),
-         String(microphone), String(battery), String(clipboard), String(clipboardWindow),
+         String(microphone), String(battery), String(clipboard), String(clipboardWindow), clipboardCardSize,
          String(capture), String(trackChange), captureAction, String(showInCaptures),
          String(returnHome), homeModule, String(opensActivity), String(scratchpad),
          String(agentsEnabled), String(watchEnabled), String(keepAwakeActivity)]
@@ -485,6 +486,18 @@ struct NotchSettings: View {
         case .clipboard:
             destination(FeatureStrings.clipboard(l10n.language).title, symbol: "doc.on.clipboard", value: $clipboardWindow, available: AppFeature.clipboardHistory.isAvailable)
             switchRow("doc.on.clipboard", text.clipboardActivity, caption: text.privacy, isOn: $clipboard)
+            if clipboardWindow, AppFeature.clipboardHistory.isAvailable {
+                let size = FeatureStrings.notchClipboardSize(l10n.language)
+                SettingsRow(symbol: "rectangle.compress.vertical", title: size.entrySize, caption: size.hint) {
+                    Picker(size.entrySize, selection: $clipboardCardSize) {
+                        Text(size.compact).tag(NotchClipboardCardSize.compact.rawValue)
+                        Text(size.comfortable).tag(NotchClipboardCardSize.comfortable.rawValue)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                }
+            }
         case .captures:
             SettingsFeatureSwitchRow(symbol: "camera.viewfinder", title: text.captureActivity, isOn: $capture, feature: .screenshot)
             if capture, AppFeature.screenshot.isAvailable {

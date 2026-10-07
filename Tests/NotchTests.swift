@@ -1100,6 +1100,22 @@ enum NotchTests {
         NotchMusicExtrasTests.run(suite)
         NotchLockScreenTests.run(suite)
         NowPlayingOpenContract.run(suite)
+        for language in AppLanguage.allCases {
+            let strings = Mirror(reflecting: FeatureStrings.notchClipboardSize(language)).children.compactMap { $0.value as? String }
+            suite.expect(strings.count == 4 && strings.allSatisfy { !$0.isEmpty && !$0.contains("—") },
+                         "the clipboard entry size has complete strings in \(language.rawValue)")
+        }
+        let sizeDomain = "com.vorssaint.tests.notch-clipboard-size"
+        let sizeDefaults = UserDefaults(suiteName: sizeDomain)!
+        sizeDefaults.removePersistentDomain(forName: sizeDomain)
+        defer { sizeDefaults.removePersistentDomain(forName: sizeDomain) }
+        suite.expect(NotchClipboardCardSize.current(in: sizeDefaults) == .compact, "clipboard entries start compact")
+        sizeDefaults.set("comfortable", forKey: DefaultsKey.notchClipboardCardSize)
+        suite.expect(NotchClipboardCardSize.current(in: sizeDefaults) == .comfortable, "the chosen entry size is read")
+        sizeDefaults.set("huge", forKey: DefaultsKey.notchClipboardCardSize)
+        suite.expect(NotchClipboardCardSize.current(in: sizeDefaults) == .compact, "an unknown entry size falls back to compact")
+        suite.expect(NotchLayout.clipboardCompactCardHeight < NotchLayout.clipboardCardHeight && NotchClipboardCardSize.dwell > 0,
+                     "a compact entry is shorter than an open one and opens after a pause")
         let domain = "com.vorssaint.tests.notch"
         let defaults = UserDefaults(suiteName: domain)!
         defaults.removePersistentDomain(forName: domain)

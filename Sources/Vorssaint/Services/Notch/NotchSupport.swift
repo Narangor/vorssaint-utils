@@ -242,6 +242,8 @@ enum NotchLayout {
     /// The row of actions while the search field is closed.
     static let clipboardActionsHeight: CGFloat = 28
     static let clipboardCardHeight: CGFloat = 104
+    /// One or two lines of the entry, until the pointer rests on it.
+    static let clipboardCompactCardHeight: CGFloat = 52
     static let emptyHeight: CGFloat = 140
     static let musicControlsRowHeight: CGFloat = 32
     static let musicIdleHeight: CGFloat = 84
