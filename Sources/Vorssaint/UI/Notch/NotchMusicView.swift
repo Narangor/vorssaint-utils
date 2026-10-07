@@ -127,6 +127,7 @@ struct NotchMusicView: View {
             NotchLyricsService.shared.hide()
             service.setQueueVisible(false)
             shuffle.stop()
+            spotify.setQueueVisible(false)
         }
     }
 
@@ -137,6 +138,7 @@ struct NotchMusicView: View {
         NotchService.shared.setPageLayer(.music, close: openExtra == nil ? nil : { extra = nil })
         NotchLyricsService.shared.update(playback: service.playback, visible: extra == .lyrics)
         service.setQueueVisible(extra == .queue)
+        spotify.setQueueVisible(extra == .queue)
     }
 
     /// The cover and what goes beside it. Beside a camera the cover reaches
