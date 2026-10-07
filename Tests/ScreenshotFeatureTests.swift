@@ -1761,7 +1761,7 @@ enum ScreenshotFeatureTests {
                                                       stroke: .large,
                                                       arrowStyle: style)],
                         in: context,
-                        pixelated: [:],
+                        blurSources: .none,
                         imageSize: CGSize(width: width, height: height),
                         scale: 2,
                         annotationShadowsEnabled: true)
@@ -1799,7 +1799,8 @@ enum ScreenshotFeatureTests {
                                                                 arrowStyle: nil)
                 && pixelateStyle == ScreenshotSupport.SelectionStyle(
                     color: nil, stroke: nil, arrowStyle: nil,
-                    blurLevel: ScreenshotSupport.BlurStrength.defaultLevel)
+                    blurLevel: ScreenshotSupport.BlurStrength.defaultLevel,
+                    blurStyle: .pixelate, blurTextOnly: false)
                 && highlightStyle.color == .some(.yellow)
                 && highlightStyle.stroke == nil
                 && highlightStyle.arrowStyle == nil,
@@ -1852,7 +1853,8 @@ enum ScreenshotFeatureTests {
                                              blurLevel: 5),
             ]
             let export = ScreenshotRenderer.renderExport(
-                baseImage: base, annotations: marks, pixelated: [1: light, 5: heavy], scale: 1,
+                baseImage: base, annotations: marks,
+                blurSources: .init(mosaics: [1: light, 5: heavy]), scale: 1,
                 annotationShadowsEnabled: false, watermark: ScreenshotSupport.WatermarkStyle(),
                 watermarkImage: nil, style: ScreenshotSupport.BackdropStyle(kind: .none, cornerRadius: 0),
                 fill: .none, downscaleTo1x: false)
@@ -1899,7 +1901,8 @@ enum ScreenshotFeatureTests {
                     tool: .pixelate, rect: CGRect(x: 3, y: 2, width: 19, height: 14))
                 func exportedPixels(using mosaic: CGImage) -> [UInt8]? {
                     guard let image = ScreenshotRenderer.renderExport(
-                        baseImage: source, annotations: [area], pixelated: [3: mosaic], scale: 1,
+                        baseImage: source, annotations: [area],
+                        blurSources: .init(mosaics: [3: mosaic]), scale: 1,
                         annotationShadowsEnabled: false, watermark: ScreenshotSupport.WatermarkStyle(),
                         watermarkImage: nil, style: ScreenshotSupport.BackdropStyle(kind: .none, cornerRadius: 0),
                         fill: .none, downscaleTo1x: false)?.image else { return nil }
@@ -1924,6 +1927,227 @@ enum ScreenshotFeatureTests {
         }
         suite.expect(sampledIsSmaller, "pixelation caches sampled pixels instead of a full capture")
         suite.expect(exportedPixelsMatch, "sampled mosaics export the same clipped pixels as full-size mosaics")
+
+        // Blur styles and text only areas, drawn over small known pictures.
+        let BlurStyle = ScreenshotSupport.BlurStyleID.self
+        suite.expect(BlurStyle.sanitized(nil) == .pixelate && BlurStyle.sanitized("erase") == .erase
+                && BlurStyle.sanitized("smudge") == .pixelate
+                && BlurStyle.pixelate.usesStrength && BlurStyle.blur.usesStrength
+                && !BlurStyle.erase.usesStrength,
+               "blur areas start as pixelate, and only erasing has no strength")
+        let erasedTextArea = ScreenshotSupport.Annotation(tool: .pixelate, blurLevel: 2,
+                                                          blurStyle: .erase, blurTextOnly: true)
+        suite.expect(ScreenshotSupport.selectionStyle(for: erasedTextArea)
+                == ScreenshotSupport.SelectionStyle(color: nil, stroke: nil, arrowStyle: nil,
+                                                    blurLevel: 2, blurStyle: .erase,
+                                                    blurTextOnly: true),
+               "picking a blur area shows its own style, strength and text only choice")
+        let softArea = ScreenshotSupport.Annotation(tool: .pixelate, blurLevel: 4, blurStyle: .blur)
+        suite.expect(ScreenshotSupport.mosaicLevels(for: [lightArea, softArea, erasedTextArea]) == [1]
+                && ScreenshotSupport.softBlurLevels(for: [lightArea, softArea, erasedTextArea]) == [4],
+               "each blur style keeps samples only for its own levels, and erasing keeps none")
+        func sameRect(_ left: CGRect, _ right: CGRect) -> Bool {
+            abs(left.minX - right.minX) < 0.001 && abs(left.minY - right.minY) < 0.001
+                && abs(left.width - right.width) < 0.001 && abs(left.height - right.height) < 0.001
+        }
+        let runWords = [
+            ScreenshotSupport.RecognizedWord(text: "john", rect: CGRect(x: 10, y: 10, width: 40, height: 20), line: 0),
+            ScreenshotSupport.RecognizedWord(text: "doe", rect: CGRect(x: 56, y: 10, width: 30, height: 20), line: 0),
+            ScreenshotSupport.RecognizedWord(text: "total", rect: CGRect(x: 300, y: 10, width: 50, height: 20), line: 0),
+            ScreenshotSupport.RecognizedWord(text: "next", rect: CGRect(x: 10, y: 40, width: 40, height: 20), line: 1),
+        ]
+        let textRuns = ScreenshotSupport.textRuns(from: runWords)
+        suite.expect(textRuns.count == 3
+                && sameRect(textRuns[0], CGRect(x: 7, y: 6, width: 82, height: 28))
+                && sameRect(textRuns[1], CGRect(x: 297, y: 6, width: 56, height: 28))
+                && sameRect(textRuns[2], CGRect(x: 7, y: 36, width: 46, height: 28)),
+               "close words on a line share a padded run, far ones and other lines get their own")
+        let pickedRuns = ScreenshotSupport.blurTextRuns(in: CGRect(x: 0, y: 0, width: 60, height: 30),
+                                                        from: textRuns)
+        suite.expect(pickedRuns.count == 1 && sameRect(pickedRuns[0], textRuns[0])
+                && ScreenshotSupport.blurTextRuns(in: CGRect(x: 400, y: 0, width: 20, height: 20),
+                                                  from: textRuns).isEmpty
+                && ScreenshotSupport.blurTextRuns(in: CGRect(x: 1, y: 2, width: 3, height: 4), from: nil)
+                    == [CGRect(x: 1, y: 2, width: 3, height: 4)],
+               "a text only area covers the runs it reaches, and all of itself before recognition")
+        let bandSizes = [(3456, 2234), (5120, 2880), (6016, 3384), (2000, 20_000), (300, 200)]
+        let bandsHold = bandSizes.allSatisfy { size in
+            let bands = ScreenshotSupport.recognitionTiles(width: size.0, height: size.1)
+            guard let first = bands.first, let last = bands.last,
+                  first.ownedRows.lowerBound == 0,
+                  last.ownedRows.upperBound == CGFloat(size.1) else { return false }
+            return zip(bands, bands.dropFirst()).allSatisfy { upper, lower in
+                // Owned rows meet without a gap, and each band reads well past them.
+                upper.ownedRows.upperBound == lower.ownedRows.lowerBound
+                    && upper.rect.maxY - upper.ownedRows.upperBound >= 64
+                    && lower.ownedRows.lowerBound - lower.rect.minY >= 64
+            } && bands.allSatisfy {
+                $0.rect.width == CGFloat(size.0) && $0.rect.minY <= $0.ownedRows.lowerBound
+                    && $0.ownedRows.upperBound <= $0.rect.maxY
+            }
+        }
+        suite.expect(bandsHold && ScreenshotSupport.recognitionTiles(width: 3456, height: 2234).count == 1
+                && ScreenshotSupport.recognitionTiles(width: 5120, height: 2880).count == 2,
+               "recognition bands overlap where they meet, so a line on the seam is read, and keep each word once")
+        func picture(width: Int, height: Int,
+                     _ color: (Int, Int) -> (UInt8, UInt8, UInt8)) -> CGImage? {
+            var bytes = [UInt8](repeating: 255, count: width * height * 4)
+            for y in 0..<height {
+                for x in 0..<width {
+                    let (red, green, blue) = color(x, y)
+                    let offset = (y * width + x) * 4
+                    bytes[offset] = red
+                    bytes[offset + 1] = green
+                    bytes[offset + 2] = blue
+                }
+            }
+            guard let provider = CGDataProvider(data: Data(bytes) as CFData) else { return nil }
+            return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                           bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                           bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                           provider: provider, decode: nil, shouldInterpolate: false,
+                           intent: .defaultIntent)
+        }
+        // Rows come back top-down, as the annotations are placed.
+        func exportedPixels(_ base: CGImage,
+                            _ marks: [ScreenshotSupport.Annotation],
+                            _ sources: ScreenshotRenderer.BlurSources) -> [UInt8]? {
+            guard let image = ScreenshotRenderer.renderExport(
+                baseImage: base, annotations: marks, blurSources: sources, scale: 1,
+                annotationShadowsEnabled: false, watermark: ScreenshotSupport.WatermarkStyle(),
+                watermarkImage: nil, style: ScreenshotSupport.BackdropStyle(kind: .none, cornerRadius: 0),
+                fill: .none, downscaleTo1x: false)?.image else { return nil }
+            var pixels = [UInt8](repeating: 0, count: base.width * base.height * 4)
+            let read = pixels.withUnsafeMutableBytes { buffer -> Bool in
+                guard let context = CGContext(data: buffer.baseAddress, width: base.width,
+                                              height: base.height, bitsPerComponent: 8,
+                                              bytesPerRow: base.width * 4,
+                                              space: CGColorSpaceCreateDeviceRGB(),
+                                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+                else { return false }
+                context.draw(image, in: CGRect(x: 0, y: 0, width: base.width, height: base.height))
+                return true
+            }
+            return read ? pixels : nil
+        }
+        func rgb(_ pixels: [UInt8], width: Int, _ x: Int, _ y: Int) -> [Int] {
+            let offset = (y * width + x) * 4
+            return [Int(pixels[offset]), Int(pixels[offset + 1]), Int(pixels[offset + 2])]
+        }
+        // A striped word on white, and a red square beside it that is not text.
+        let wordBox = CGRect(x: 20, y: 20, width: 40, height: 12)
+        let squareBox = CGRect(x: 85, y: 25, width: 20, height: 20)
+        let textScene = picture(width: 120, height: 60) { x, y in
+            if wordBox.contains(CGPoint(x: x, y: y)) { return x % 2 == 0 ? (0, 0, 0) : (255, 255, 255) }
+            if squareBox.contains(CGPoint(x: x, y: y)) { return (255, 0, 0) }
+            return (255, 255, 255)
+        }
+        let wordRuns = ScreenshotSupport.textRuns(from: [
+            ScreenshotSupport.RecognizedWord(text: "secret", rect: wordBox, line: 0),
+        ])
+        func pixelPoints(in box: CGRect) -> [(Int, Int)] {
+            (Int(box.minY)..<Int(box.maxY)).flatMap { y in
+                (Int(box.minX)..<Int(box.maxX)).map { x in (x, y) }
+            }
+        }
+        if let scene = textScene, let sceneMosaic = ScreenshotRenderer.pixelatedImage(from: scene) {
+            let area = CGRect(x: 10, y: 10, width: 100, height: 40)
+            func textOnly(_ style: ScreenshotSupport.BlurStyleID) -> [ScreenshotSupport.Annotation] {
+                [ScreenshotSupport.Annotation(tool: .pixelate, rect: area,
+                                              blurStyle: style, blurTextOnly: true)]
+            }
+            let original = exportedPixels(scene, [], .none)
+            let pixelatedText = exportedPixels(scene, textOnly(.pixelate),
+                                               .init(mosaics: [3: sceneMosaic], textRuns: wordRuns))
+            let pendingText = exportedPixels(scene, textOnly(.pixelate),
+                                             .init(mosaics: [3: sceneMosaic], textRuns: nil))
+            let erasedText = exportedPixels(scene, textOnly(.erase),
+                                            .init(image: scene, textRuns: wordRuns))
+            if let original, let pixelatedText, let pendingText, let erasedText {
+                let squareKept = pixelPoints(in: squareBox).allSatisfy {
+                    rgb(pixelatedText, width: 120, $0.0, $0.1) == rgb(original, width: 120, $0.0, $0.1)
+                        && rgb(erasedText, width: 120, $0.0, $0.1) == [255, 0, 0]
+                }
+                let wordHidden = pixelPoints(in: wordBox).filter {
+                    rgb(pixelatedText, width: 120, $0.0, $0.1) != rgb(original, width: 120, $0.0, $0.1)
+                }.count > Int(wordBox.width * wordBox.height) / 3
+                suite.expect(squareKept && wordHidden,
+                       "a text only area hides the recognized word and leaves the rest of the picture alone")
+                suite.expect(pixelPoints(in: squareBox).contains {
+                    rgb(pendingText, width: 120, $0.0, $0.1) != [255, 0, 0]
+                }, "before recognition finishes, a text only area covers all of itself")
+                suite.expect(pixelPoints(in: wordBox).allSatisfy {
+                    rgb(erasedText, width: 120, $0.0, $0.1) == [255, 255, 255]
+                }, "erasing text paints the word over with the flat background around it")
+            } else {
+                suite.expect(false, "the text only scenes render")
+            }
+        } else {
+            suite.expect(false, "the text only scene and its mosaic are built")
+        }
+        // Two close lines, the first led by a pink bullet that recognition
+        // counts as text. The second line's fill must not pick the pink up.
+        let firstLine = CGRect(x: 8, y: 8, width: 100, height: 28)
+        let secondLine = CGRect(x: 8, y: 34, width: 100, height: 28)
+        if let lines = picture(width: 120, height: 80, { x, y in
+            if x >= 10, x < 30, y >= 10, y < 34 { return (255, 105, 180) }
+            if x >= 36, x < 100, y >= 40, y < 56, x % 2 == 0 { return (0, 0, 0) }
+            return (255, 255, 255)
+        }), let erasedLines = exportedPixels(
+            lines,
+            [ScreenshotSupport.Annotation(tool: .pixelate, rect: CGRect(x: 0, y: 0, width: 120, height: 80),
+                                          blurStyle: .erase, blurTextOnly: true)],
+            .init(image: lines, textRuns: [firstLine, secondLine])) {
+            suite.expect(pixelPoints(in: CGRect(x: 10, y: 10, width: 90, height: 48)).allSatisfy {
+                rgb(erasedLines, width: 120, $0.0, $0.1).allSatisfy { $0 >= 250 }
+            }, "erasing a line never smears in what sits inside the text next to it")
+        } else {
+            suite.expect(false, "the two line scene renders")
+        }
+        // A gradient running both ways, with a dark block to erase.
+        let blockBox = CGRect(x: 50, y: 26, width: 28, height: 12)
+        if let gradient = picture(width: 128, height: 64, { x, y in
+            blockBox.contains(CGPoint(x: x, y: y)) ? (0, 0, 0) : (UInt8(x * 2), UInt8(y * 2), 100)
+        }), let erased = exportedPixels(
+            gradient,
+            [ScreenshotSupport.Annotation(tool: .pixelate, rect: CGRect(x: 44, y: 20, width: 40, height: 24),
+                                          blurStyle: .erase)],
+            .init(image: gradient)) {
+            let matches = [(52, 28), (64, 32), (76, 36)].allSatisfy { point in
+                let color = rgb(erased, width: 128, point.0, point.1)
+                return abs(color[0] - point.0 * 2) <= 6 && abs(color[1] - point.1 * 2) <= 6
+                    && abs(color[2] - 100) <= 2
+            }
+            suite.expect(matches, "erasing an area continues the gradient around it")
+        } else {
+            suite.expect(false, "the gradient scene renders")
+        }
+        // Black beside white: a mosaic keeps a hard step, a soft blur eases across it.
+        if let halves = picture(width: 120, height: 60, { x, _ in x < 60 ? (0, 0, 0) : (255, 255, 255) }),
+           let mosaic = ScreenshotRenderer.pixelatedImage(from: halves),
+           let soft = ScreenshotRenderer.softBlurredImage(from: halves) {
+            let area = [ScreenshotSupport.Annotation(tool: .pixelate,
+                                                     rect: CGRect(x: 10, y: 10, width: 100, height: 40),
+                                                     blurStyle: .blur)]
+            let blurred = exportedPixels(halves, area, .init(softBlurs: [3: soft]))
+            let largestStep = blurred.map { pixels in
+                (11..<109).map { x in abs(rgb(pixels, width: 120, x + 1, 30)[0]
+                                          - rgb(pixels, width: 120, x, 30)[0]) }.max() ?? 255
+            } ?? 255
+            suite.expect(soft.width < halves.width && soft.height < halves.height
+                    && soft.width > mosaic.width && soft.height > mosaic.height,
+                   "a soft blur is kept as a small sample, finer than the mosaic so it stretches smoothly")
+            suite.expect(largestStep < 40 && blurred.map { rgb($0, width: 120, 59, 30)[0] > 20 } == true,
+                   "a soft blur eases across an edge instead of stepping like a mosaic")
+        } else {
+            suite.expect(false, "the soft blur scene and its samples are built")
+        }
+        suite.expect(screenshotEditorSource.contains("annotations[index].blurStyle = blurStyle")
+                && screenshotEditorSource.contains("annotations[index].blurTextOnly = blurTextOnly")
+                && screenshotEditorSource.contains("blurStyle: blurStyle, blurTextOnly: blurTextOnly"),
+               "new and picked blur areas take the chosen style and text only choice")
+        suite.expect(screenshotEditorSource.contains("textRuns = nil"),
+               "undoing a crop forgets runs that belong to the other picture")
         let bigText = ScreenshotSupport.Annotation(tool: .text, stroke: .small, textSize: 48)
         suite.expect(ScreenshotSupport.selectionStyle(for: bigText)
                 == ScreenshotSupport.SelectionStyle(color: .red, stroke: nil,
@@ -2014,7 +2238,7 @@ enum ScreenshotFeatureTests {
         if let retinaCapture {
             let plain = ScreenshotSupport.BackdropStyle(kind: .none, cornerRadius: 0)
             let full = ScreenshotRenderer.renderExport(baseImage: retinaCapture, annotations: [],
-                                                       pixelated: [:], scale: 2,
+                                                       blurSources: .none, scale: 2,
                                                        annotationShadowsEnabled: false,
                                                        watermark: ScreenshotSupport.WatermarkStyle(),
                                                        watermarkImage: nil,
@@ -2023,7 +2247,7 @@ enum ScreenshotFeatureTests {
             suite.expect(full?.scale == 2 && full?.image.width == 8,
                    "a Retina export keeps its pixels and its density")
             let halved = ScreenshotRenderer.renderExport(baseImage: retinaCapture, annotations: [],
-                                                         pixelated: [:], scale: 2,
+                                                         blurSources: .none, scale: 2,
                                                          annotationShadowsEnabled: false,
                                                          watermark: ScreenshotSupport.WatermarkStyle(),
                                                          watermarkImage: nil,
@@ -2244,7 +2468,7 @@ enum ScreenshotFeatureTests {
         }
         func markedExport(_ watermark: ScreenshotSupport.WatermarkStyle,
                           picture: CGImage?, base: CGImage) -> [UInt8]? {
-            ScreenshotRenderer.renderExport(baseImage: base, annotations: [], pixelated: [:],
+            ScreenshotRenderer.renderExport(baseImage: base, annotations: [], blurSources: .none,
                                             scale: 1, annotationShadowsEnabled: false,
                                             watermark: watermark, watermarkImage: picture,
                                             style: ScreenshotSupport.BackdropStyle(kind: .none,
@@ -2799,6 +3023,11 @@ enum ScreenshotFeatureTests {
         suite.expect(Defaults.registeredDefaults[DefaultsKey.screenshotLastBlurLevel] as? Int
                 == ScreenshotSupport.BlurStrength.defaultLevel,
                "the pixelate tool starts at the strength it always had")
+        suite.expect(Defaults.registeredDefaults[DefaultsKey.screenshotLastBlurStyle] as? String
+                == ScreenshotSupport.BlurStyleID.pixelate.rawValue
+                && Defaults.registeredDefaults[DefaultsKey.screenshotLastBlurTextOnly] as? Bool == false
+                && SettingsBackupSupport.exportKeys().contains(DefaultsKey.screenshotLastBlurStyle),
+               "the blur tool starts pixelating whole areas, and its choices travel in backups")
         suite.expect(Defaults.registeredDefaults[DefaultsKey.screenshotLastTextSize] as? Int
                 == ScreenshotSupport.defaultTextSize,
                "text starts at the size the medium thickness used to give it")

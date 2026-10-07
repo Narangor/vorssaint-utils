@@ -12,14 +12,18 @@ All notable changes to this project are documented here. The format follows
 - The volume indicator stays hidden while headphones like AirPods Pro adjust their own level. Volume keys still show it.
 - With Hide timer countdown on, the closed island shows the timer when time is up and keeps it until you dismiss it.
 
+### Added
+- The screenshot editor's Pixelate tool is now Blur, and it can pixelate, blur or erase a whole area or only the text inside it.
+
 ### Changed
 - Clear unpinned asks first everywhere and says how many items it removes. Anything copied while it asks is kept.
 
 ### Fixed
 - In the Clipboard history window, a new copy no longer moves the highlight, so Return pastes the entry you picked.
+- The screenshot editor no longer misses lines of text in very large and scrolling captures.
 
 ### Contributors
-Thanks to @mugurc, @nik2k-7 and @PathGao. Feedback: Brain and Martimm500.
+Thanks to @AB-boi, @emilianorobles, @mugurc, @nik2k-7 and @PathGao. Feedback: Brain and Martimm500.
 
 ## [3.4.1-beta.2] - 2026-10-06
 

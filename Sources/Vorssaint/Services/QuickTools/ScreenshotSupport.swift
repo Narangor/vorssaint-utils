@@ -1656,6 +1656,21 @@ enum ScreenshotSupport {
         }
     }
 
+    /// What a blur area does to what is under it. Pixelate was the only style
+    /// before, so it stays the default.
+    enum BlurStyleID: String, CaseIterable {
+        case pixelate, blur, erase
+
+        static func sanitized(_ raw: String?) -> BlurStyleID {
+            BlurStyleID(rawValue: raw ?? "") ?? .pixelate
+        }
+
+        /// Erasing paints the surroundings over the area, so it has no strength.
+        var usesStrength: Bool {
+            self != .erase
+        }
+    }
+
     static func randomScribbleSeed() -> UInt64 {
         UInt64.random(in: UInt64.min...UInt64.max)
     }
@@ -1716,6 +1731,9 @@ enum ScreenshotSupport {
         var stroke: StrokeID
         var textSize: Int
         var blurLevel: Int
+        var blurStyle: BlurStyleID
+        /// A blur area that covers only the text recognized inside it.
+        var blurTextOnly: Bool
         var arrowStyle: ArrowStyleID
         var scribbleSeed: UInt64
         var number: Int
@@ -1729,6 +1747,8 @@ enum ScreenshotSupport {
              stroke: StrokeID = .medium,
              textSize: Int = ScreenshotSupport.defaultTextSize,
              blurLevel: Int = BlurStrength.defaultLevel,
+             blurStyle: BlurStyleID = .pixelate,
+             blurTextOnly: Bool = false,
              arrowStyle: ArrowStyleID = .filled,
              scribbleSeed: UInt64? = nil,
              number: Int = 0) {
@@ -1741,6 +1761,8 @@ enum ScreenshotSupport {
             self.stroke = stroke
             self.textSize = textSize
             self.blurLevel = blurLevel
+            self.blurStyle = blurStyle
+            self.blurTextOnly = blurTextOnly
             self.arrowStyle = arrowStyle
             self.scribbleSeed = scribbleSeed
                 ?? (arrowStyle == .scribbly
@@ -1757,6 +1779,8 @@ enum ScreenshotSupport {
         let arrowStyle: ArrowStyleID?
         var textSize: Int? = nil
         var blurLevel: Int? = nil
+        var blurStyle: BlurStyleID? = nil
+        var blurTextOnly: Bool? = nil
     }
 
     static func selectionStyle(for annotation: Annotation) -> SelectionStyle {
@@ -1782,7 +1806,9 @@ enum ScreenshotSupport {
             return SelectionStyle(color: nil,
                                   stroke: nil,
                                   arrowStyle: nil,
-                                  blurLevel: annotation.blurLevel)
+                                  blurLevel: annotation.blurLevel,
+                                  blurStyle: annotation.blurStyle,
+                                  blurTextOnly: annotation.blurTextOnly)
         case .sticker, .select, .crop:
             return SelectionStyle(color: nil,
                                   stroke: nil,
@@ -2298,7 +2324,54 @@ enum ScreenshotSupport {
     /// The blur levels the pixelate marks use. Keep only their sampled mosaics;
     /// drawing expands each one to the capture size when needed.
     static func mosaicLevels(for annotations: [Annotation]) -> Set<Int> {
-        Set(annotations.filter { $0.tool == .pixelate }.map(\.blurLevel))
+        blurLevels(for: annotations, style: .pixelate)
+    }
+
+    /// The levels the soft blur marks use, each kept as a small blurred sample
+    /// the same way.
+    static func softBlurLevels(for annotations: [Annotation]) -> Set<Int> {
+        blurLevels(for: annotations, style: .blur)
+    }
+
+    private static func blurLevels(for annotations: [Annotation], style: BlurStyleID) -> Set<Int> {
+        Set(annotations.filter { $0.tool == .pixelate && $0.blurStyle == style }.map(\.blurLevel))
+    }
+
+    /// Recognized words joined into the runs a text only blur area covers.
+    /// Neighboring words on a line share one run, so the spaces between them
+    /// are covered too, and words far apart, like table columns, stay apart.
+    /// Each run is padded past the antialiased edges of its glyphs.
+    static func textRuns(from words: [RecognizedWord]) -> [CGRect] {
+        var runs: [CGRect] = []
+        var current: (rect: CGRect, line: Int)?
+        for word in words where word.rect.width > 0 && word.rect.height > 0 {
+            if let run = current, run.line == word.line {
+                let height = max(run.rect.height, word.rect.height)
+                let gap = max(word.rect.minX - run.rect.maxX, run.rect.minX - word.rect.maxX, 0)
+                let overlap = min(run.rect.maxY, word.rect.maxY) - max(run.rect.minY, word.rect.minY)
+                if gap <= height * 1.5,
+                   overlap >= min(run.rect.height, word.rect.height) / 2 {
+                    current = (run.rect.union(word.rect), run.line)
+                    continue
+                }
+            }
+            if let run = current { runs.append(paddedTextRun(run.rect)) }
+            current = (word.rect, word.line)
+        }
+        if let run = current { runs.append(paddedTextRun(run.rect)) }
+        return runs
+    }
+
+    private static func paddedTextRun(_ rect: CGRect) -> CGRect {
+        rect.insetBy(dx: -max(1, rect.height * 0.15), dy: -max(1, rect.height * 0.2))
+    }
+
+    /// The runs a text only blur area covers: every run that reaches into it.
+    /// Nil runs mean recognition has not read the capture yet, and the whole
+    /// area stands in for them, so an early export never leaves text readable.
+    static func blurTextRuns(in rect: CGRect, from runs: [CGRect]?) -> [CGRect] {
+        guard let runs else { return [rect] }
+        return runs.filter { $0.intersects(rect) }
     }
 
     // MARK: - Export
@@ -2479,6 +2552,29 @@ enum ScreenshotSupport {
         let rect: CGRect
         /// Line index, so copied selections keep their line breaks.
         let line: Int
+    }
+
+    /// Bands of the capture that text recognition reads one at a time, so a
+    /// tall capture never becomes one huge request. Neighboring bands share
+    /// some rows, because recognition misses a line cut by a band's edge, and
+    /// each band owns the rows up to the middle of what it shares, so every
+    /// word is kept once.
+    static func recognitionTiles(width: Int, height: Int) -> [(rect: CGRect, ownedRows: Range<CGFloat>)] {
+        let maximumTilePixels = 12_000_000
+        let tileHeight = min(height, max(512, min(4096, maximumTilePixels / max(width, 1))))
+        let overlap = tileHeight < height ? min(256, tileHeight / 4) : 0
+        var tiles: [(rect: CGRect, ownedRows: Range<CGFloat>)] = []
+        var tileY = 0
+        while tileY < height {
+            let bandHeight = min(tileHeight, height - tileY)
+            let isLast = tileY + bandHeight >= height
+            tiles.append((CGRect(x: 0, y: tileY, width: width, height: bandHeight),
+                          CGFloat(tileY == 0 ? 0 : tileY + overlap / 2)
+                            ..< CGFloat(isLast ? height : tileY + bandHeight - overlap / 2)))
+            if isLast { break }
+            tileY += bandHeight - overlap
+        }
+        return tiles
     }
 
     /// Words a selection drag touches, in reading order. A hairline drag

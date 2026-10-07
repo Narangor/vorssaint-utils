@@ -294,7 +294,7 @@ struct ScreenshotEditorView: View {
         }
         ScreenshotRenderer.drawAnnotations(model.annotations,
                                            in: cg,
-                                           pixelated: model.pixelated,
+                                           blurSources: model.blurSources,
                                            imageSize: model.imageSize,
                                            scale: model.scale,
                                            annotationShadowsEnabled: model.annotationShadowsEnabled,
@@ -949,7 +949,11 @@ struct ScreenshotEditorView: View {
                 Divider().frame(height: 16)
             }
             if showsBlurControls {
-                blurLevelControl
+                blurStyleMenu
+                blurTextOnlyButton
+                if model.blurStyle.usesStrength {
+                    blurLevelControl
+                }
                 Divider().frame(height: 16)
             }
             if showsColorControls {
@@ -1155,6 +1159,63 @@ struct ScreenshotEditorView: View {
         .screenshotSafeHelp(strings.fontSizeLabel)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(strings.fontSizeLabel)
+    }
+
+    /// Pixelate, blur or erase, picked the way an arrow style is.
+    private var blurStyleMenu: some View {
+        Menu {
+            Picker(strings.blurStyleLabel, selection: $model.blurStyle) {
+                ForEach(ScreenshotSupport.BlurStyleID.allCases, id: \.self) { style in
+                    Label(strings.blurStyleTitle(style), systemImage: style.screenshotSymbolName)
+                        .tag(style)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: model.blurStyle.screenshotSymbolName)
+                    .font(.system(size: 12, weight: .medium))
+                Text(strings.blurStyleTitle(model.blurStyle))
+                    .font(.system(size: 11.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 7)
+            .frame(height: 24)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .screenshotSafeHelp(strings.blurStyleLabel)
+        .accessibilityLabel(strings.blurStyleLabel)
+    }
+
+    /// Covers only the text recognized inside the area and leaves the rest of
+    /// the picture as it was. The name shows beside the icon because tooltips
+    /// are off on macOS 27.
+    private var blurTextOnlyButton: some View {
+        Button {
+            model.blurTextOnly.toggle()
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "character.textbox")
+                    .font(.system(size: 12, weight: .medium))
+                Text(strings.blurTextOnly)
+                    .font(.system(size: 11.5, weight: .medium))
+            }
+            .padding(.horizontal, 7)
+            .frame(height: 24)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(model.blurTextOnly ? Color.accentColor.opacity(0.20) : .clear)
+            )
+            .foregroundStyle(model.blurTextOnly ? Color.accentColor : Color.primary.opacity(0.65))
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        }
+        .buttonStyle(.borderless)
+        .fixedSize()
+        .screenshotSafeHelp(strings.blurTextOnly)
+        .accessibilityLabel(strings.blurTextOnly)
+        .accessibilityAddTraits(model.blurTextOnly ? .isSelected : [])
     }
 
     /// Five steps from a light blur to a heavy one; the middle is the
@@ -1534,9 +1595,19 @@ extension ScreenshotSupport.Tool {
         case .text: return strings.toolText
         case .sticker: return strings.toolSticker
         case .counter: return strings.toolCounter
-        case .pixelate: return strings.toolPixelate
+        case .pixelate: return strings.toolBlur
         case .redact: return strings.toolRedact
         case .crop: return strings.toolCrop
+        }
+    }
+}
+
+extension ScreenshotSupport.BlurStyleID {
+    var screenshotSymbolName: String {
+        switch self {
+        case .pixelate: return "aqi.medium"
+        case .blur: return "drop.halffull"
+        case .erase: return "eraser"
         }
     }
 }
@@ -1586,7 +1657,7 @@ private enum ScreenshotArrowStyleSamples {
             scribbleSeed: 0x5343524942424C59)
         ScreenshotRenderer.drawAnnotations([sample],
                                            in: context,
-                                           pixelated: [:],
+                                           blurSources: .none,
                                            imageSize: pixels,
                                            scale: scale,
                                            annotationShadowsEnabled: false)

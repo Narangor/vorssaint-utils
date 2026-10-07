@@ -670,6 +670,8 @@ enum DefaultsKey {
     static let screenshotLastStroke = "screenshotLastStroke"
     static let screenshotLastTextSize = "screenshotLastTextSize"
     static let screenshotLastBlurLevel = "screenshotLastBlurLevel"
+    static let screenshotLastBlurStyle = "screenshotLastBlurStyle"
+    static let screenshotLastBlurTextOnly = "screenshotLastBlurTextOnly"
     static let screenshotLastArrowStyle = "screenshotLastArrowStyle"
     static let screenshotLastSticker = "screenshotLastSticker"
     static let screenshotAnnotationShadows = "screenshotAnnotationShadows"
@@ -1817,6 +1819,8 @@ enum Defaults {
         DefaultsKey.screenshotLastStroke: "medium",
         DefaultsKey.screenshotLastTextSize: ScreenshotSupport.defaultTextSize,
         DefaultsKey.screenshotLastBlurLevel: ScreenshotSupport.BlurStrength.defaultLevel,
+        DefaultsKey.screenshotLastBlurStyle: "pixelate",
+        DefaultsKey.screenshotLastBlurTextOnly: false,
         DefaultsKey.screenshotLastArrowStyle: "filled",
         DefaultsKey.screenshotLastSticker: "check",
         DefaultsKey.screenshotAnnotationShadows: false,
