@@ -18,6 +18,8 @@ struct MetricsTests {
                 MetricsFeatureTests.run(suite)
                 ProcessNameContract.run(suite)
                 SystemMonitorCPUTests.run(suite)
+                SystemMonitorPlanTests.run(suite)
+                SystemSectionBreakdownTests.run(suite)
             }),
             ("clipboard", { ClipboardFeatureTests.run(suite) }),
             ("pointer-input", {
