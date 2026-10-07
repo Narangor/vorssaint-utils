@@ -10,6 +10,7 @@ struct NotchMusicView: View {
     @ObservedObject private var service = NotchMusicService.shared
     @ObservedObject private var l10n = L10n.shared
     @ObservedObject private var features = FeatureRuntime.shared
+    @ObservedObject private var shuffle = NotchShuffleService.shared
     @AppStorage(DefaultsKey.notchLyricsEnabled) private var lyricsEnabled = true
     @AppStorage(DefaultsKey.notchQueueEnabled) private var queueEnabled = true
     @State private var extra: MusicExtra?
@@ -65,6 +66,7 @@ struct NotchMusicView: View {
                 HStack(spacing: 6) {
                     if AppFeature.mixer.isAvailable { NotchAudioControls(style: .inline) }
                     Spacer(minLength: 16)
+                    if !preview, service.playback != nil, shuffle.isOffered { shuffleButton }
                     if showsLyrics {
                         extraButton(.lyrics, title: FeatureStrings.notchMusicExtras(l10n.language).lyrics, symbol: "quote.bubble")
                     }
@@ -81,9 +83,13 @@ struct NotchMusicView: View {
             guard !preview else { return }
             syncExtras()
             service.refreshAutomation()
+            shuffle.refresh(for: service.playback)
         }
         .onChange(of: extra) { syncExtras() }
-        .onChange(of: service.playback.map(NotchMusicIdentity.init)) { syncExtras() }
+        .onChange(of: service.playback.map(NotchMusicIdentity.init)) {
+            syncExtras()
+            if !preview { shuffle.refresh(for: service.playback) }
+        }
         .onChange(of: features.revision) { syncExtras() }
         .onChange(of: lyricsEnabled) { syncExtras() }
         .onChange(of: queueEnabled) { syncExtras() }
@@ -93,6 +99,7 @@ struct NotchMusicView: View {
             NotchService.shared.setPageLayer(.music, close: nil)
             NotchLyricsService.shared.hide()
             service.setQueueVisible(false)
+            shuffle.stop()
         }
     }
 
@@ -133,6 +140,16 @@ struct NotchMusicView: View {
         NotchIconButton(symbol: symbol, title: title, selected: extra == target) {
             extra = extra == target ? nil : target
         }
+    }
+
+    /// The player's own shuffle switch. A player not yet allowed to be
+    /// controlled asks for that first, as the playback buttons do.
+    private var shuffleButton: some View {
+        let strings = FeatureStrings.notchMusicExtras(l10n.language)
+        let consent = shuffle.availability?.access == .consent
+        return NotchIconButton(symbol: "shuffle", title: consent ? strings.allowPlayback : strings.shuffle,
+                               selected: shuffle.enabled == true) { shuffle.toggle() }
+            .disabled(shuffle.pending || shuffle.requestingAccess || !shuffle.allowed)
     }
 
     /// The artwork fills the row; the details beside it drop their artist
