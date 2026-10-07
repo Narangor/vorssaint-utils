@@ -95,12 +95,13 @@ enum NotchMusicAutomation {
         read(shuffleEvent(nil, capabilities: availability.capabilities, pid: availability.target.pid), from: availability)
     }
 
-    /// False when the player says the songs playing cannot be shuffled, as
-    /// Spotify does for a radio. A player that does not say always can.
+    /// False only when the player says the songs playing cannot be shuffled,
+    /// as Spotify does for a radio. A player that does not say, or cannot be
+    /// asked before consent, keeps the button that asks for it.
     static func shuffleAllowed(by availability: Availability) -> Bool {
         guard availability.capabilities.shuffleAllowed != nil else { return true }
         return read(shuffleAllowedEvent(capabilities: availability.capabilities, pid: availability.target.pid),
-                    from: availability) == true
+                    from: availability) != false
     }
 
     private static func read(_ event: NSAppleEventDescriptor?, from availability: Availability) -> Bool? {
