@@ -125,7 +125,7 @@ struct NotchClipboardView: View {
         .task(id: highlightedID) {
             keyExpandedID = nil
             guard !preview, !comfortable, keysMoved, let id = highlightedID else { return }
-            try? await Task.sleep(for: .seconds(NotchClipboardCardSize.dwell))
+            try? await Task.sleep(for: .seconds(NotchClipboardCardSize.keyDwell))
             guard !Task.isCancelled else { return }
             setOpen(keyID: id)
         }
