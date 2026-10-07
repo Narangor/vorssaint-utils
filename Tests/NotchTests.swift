@@ -116,6 +116,22 @@ enum NotchTests {
         suite.expect(NotchLayout.timer(mode: .pomodoro, hasSession: true, width: 424, height: 180) == 118
                && NotchLayout.timer(mode: .timer, hasSession: true, width: 304, height: tight) == 96,
                "a running session keeps its control row in every layout")
+        // Lyrics and the queue grow the island; the player keeps the height it had.
+        let musicRow = NotchLayout.musicControlsRowHeight + NotchLayout.rowSpacing
+        let extras: CGFloat = 216, resting: CGFloat = 148
+        let grown = NotchLayout.musicSplit(height: resting + musicRow + extras, controlsRow: musicRow, extras: extras,
+                                           resting: resting, keepsPlayer: true)
+        suite.expect(grown.player == resting && grown.showsPlayer && grown.extra == extras - NotchLayout.rowSpacing,
+                     "opening the queue leaves the player as tall as it was and gives the list the rest")
+        for height in stride(from: resting + musicRow, through: resting + musicRow + extras, by: 12) {
+            let growing = NotchLayout.musicSplit(height: height, controlsRow: musicRow, extras: extras, resting: resting, keepsPlayer: true)
+            suite.expect(growing.player == resting && growing.showsPlayer, "the player does not change size while the island grows")
+        }
+        let short = NotchLayout.musicSplit(height: 200, controlsRow: musicRow, extras: extras, resting: resting, keepsPlayer: false)
+        suite.expect(short.extra == 158 && !short.showsPlayer,
+                     "where the island cannot hold both, the player still yields to the list")
+        let closed = NotchLayout.musicSplit(height: resting + musicRow, controlsRow: musicRow, extras: extras, resting: nil, keepsPlayer: false, extraOpen: false)
+        suite.expect(closed.player == resting && closed.extra == 0 && closed.showsPlayer, "with nothing open the player takes the page above its musicRow")
         suite.expect(NotchLayout.musicPlayerHeight(layout: .compact, height: 180) == 120
                && NotchLayout.musicPlayerHeight(layout: .spacious, height: 264) == 148
                && NotchLayout.musicPlayerHeight(layout: .custom, height: 154) == 112

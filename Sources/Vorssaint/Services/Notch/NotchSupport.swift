@@ -486,6 +486,23 @@ enum NotchLayout {
     static func musicPlayerHeight(layout: NotchSize, height: CGFloat) -> CGFloat {
         min(layout == .spacious ? 148 : 120, max(88, height - musicControlsRowHeight - rowSpacing))
     }
+
+    /// How the music page divides its height between the player and an open
+    /// extra, lyrics or the queue. The island grows to hold both, so the
+    /// player keeps the height it had at rest, however far the island has
+    /// grown; measuring it again from the growing page made it shrink by the
+    /// gap and flicker. Where the island cannot grow enough, as at a custom
+    /// size, the player yields to the extra below a legible height.
+    static func musicSplit(height: CGFloat, controlsRow: CGFloat, extras: CGFloat, resting: CGFloat?,
+                           keepsPlayer: Bool, extraOpen: Bool = true) -> (player: CGFloat, extra: CGFloat, showsPlayer: Bool) {
+        let page = max(0, height - controlsRow)
+        guard extraOpen else { return (page, 0, true) }
+        if keepsPlayer, let resting {
+            return (resting, min(extras, max(0, page - resting - rowSpacing)), true)
+        }
+        let extra = min(extras, page)
+        return (max(0, page - extra - rowSpacing), extra, page - extra - rowSpacing >= 88)
+    }
 }
 
 struct NotchControlsLayout: Equatable {

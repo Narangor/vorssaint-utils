@@ -16,6 +16,7 @@ All notable changes to this project are documented here. The format follows
 - Clear unpinned asks first everywhere and says how many items it removes. Anything copied while it asks is kept.
 
 ### Fixed
+- Opening lyrics or Up next no longer changes the size of the player above them.
 - In the Clipboard history window, a new copy no longer moves the highlight, so Return pastes the entry you picked.
 
 ### Contributors
