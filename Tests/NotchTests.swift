@@ -1526,6 +1526,25 @@ enum NotchTests {
                 && NotchSupport.clipboardPasteTarget(highlighted: 9, in: [1, 2, 3]) == 1
                 && NotchSupport.clipboardPasteTarget(highlighted: 2, in: [Int]()) == nil,
                "Return pastes the highlighted or first visible clipboard entry, and nothing from an empty list")
+        // Opening the page highlights what was copied last, which is the first recent entry below any pinned ones.
+        suite.expect(NotchSupport.restingClipboardHighlight([(1, true), (2, true), (3, false), (4, false)]) == 3
+                && NotchSupport.restingClipboardHighlight([(1, true), (2, true)]) == 1
+                && NotchSupport.restingClipboardHighlight([(5, false)]) == 5
+                && NotchSupport.restingClipboardHighlight([(Int, Bool)]()) == nil,
+               "the clipboard opens on the entry copied last, not on a pinned one, and on the top pinned one when only those exist")
+        func key(_ code: UInt16, _ characters: String = "", command: Bool = false, editing: Bool = false) -> NotchClipboardKey? {
+            NotchSupport.clipboardKey(keyCode: code, characters: characters, hasCommandModifier: command, editing: editing)
+        }
+        suite.expect(key(126) == .move(backwards: true) && key(125) == .move(backwards: false)
+                && key(36) == .paste && key(76) == .paste && key(125, editing: true) == .move(backwards: false)
+                && key(36, editing: true) == .paste,
+               "the arrow keys and Return drive the list with or without the search field focused")
+        suite.expect(key(0, "a") == .type("a") && key(0, "Ab") == .type("Ab") && key(0, "ñ") == .type("ñ")
+                && key(0, "a", editing: true) == nil && key(49, " ") == nil && key(48, "\t") == nil && key(51, "\u{7f}") == nil
+                && key(125, "\u{F701}") == .move(backwards: false),
+               "a letter starts a search, but a field already being typed in, a space and control keys do not")
+        suite.expect(key(36, command: true) == nil && key(18, "1", command: true) == nil && key(0, "a", command: true) == nil,
+               "keys held with Command, Control or Option are left to their own shortcuts")
         suite.expect(NotchSupport.steppedItem(from: nil, in: [1, 2, 3], backwards: false) == 1
                && NotchSupport.steppedItem(from: nil, in: [1, 2, 3], backwards: true) == 1
                && NotchSupport.steppedItem(from: 1, in: [1, 2, 3], backwards: false) == 2
