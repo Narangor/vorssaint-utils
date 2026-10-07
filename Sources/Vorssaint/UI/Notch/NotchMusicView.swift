@@ -13,10 +13,6 @@ struct NotchMusicView: View {
     @AppStorage(DefaultsKey.notchLyricsEnabled) private var lyricsEnabled = true
     @AppStorage(DefaultsKey.notchQueueEnabled) private var queueEnabled = true
     @State private var extra: MusicExtra?
-    /// The player's height while no extra is open. The island grows to make
-    /// room for lyrics or the queue, so the player keeps this height instead
-    /// of being measured again while it grows.
-    @State private var restingPlayerHeight: CGFloat?
     private enum MusicExtra { case lyrics, queue }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.notchSettingsPreview) private var preview
@@ -40,10 +36,14 @@ struct NotchMusicView: View {
     var body: some View {
         let controlsRow = hasControlsRow ? NotchLayout.musicControlsRowHeight + NotchLayout.rowSpacing : 0
         // A custom size can be too short to hold both, and the player yields
-        // there; elsewhere the island grows and the player stays as it was.
+        // there; elsewhere the island grows by the extra and the player keeps
+        // the height the island reserves for it at rest. That height comes
+        // from the geometry, not from this page, which is still the idle
+        // page when music starts with lyrics already chosen.
+        let geometry = NotchService.shared.geometry
         let split = NotchLayout.musicSplit(
-            height: size.height, controlsRow: controlsRow, extras: extrasHeight, resting: restingPlayerHeight,
-            keepsPlayer: !preview && NotchService.shared.geometry.layout != .custom, extraOpen: openExtra != nil)
+            height: size.height, controlsRow: controlsRow, extras: extrasHeight, resting: geometry.musicPlayerHeight,
+            keepsPlayer: !preview && geometry.layout != .custom, extraOpen: openExtra != nil)
         let extraHeight = split.extra, showsPlayer = split.showsPlayer, playerHeight = split.player
         VStack(spacing: NotchLayout.rowSpacing) {
             if showsPlayer {
@@ -84,12 +84,10 @@ struct NotchMusicView: View {
         .onAppear {
             // A preview in Settings leaves the island's size and extras alone.
             guard !preview else { return }
-            if openExtra == nil { restingPlayerHeight = restingHeight(for: size) }
             syncExtras()
             service.refreshAutomation()
         }
         .onChange(of: extra) { syncExtras() }
-        .onChange(of: size.height) { if openExtra == nil { restingPlayerHeight = restingHeight(for: size) } }
         .onChange(of: service.playback.map(NotchMusicIdentity.init)) { syncExtras() }
         .onChange(of: features.revision) { syncExtras() }
         .onChange(of: lyricsEnabled) { syncExtras() }
@@ -101,11 +99,6 @@ struct NotchMusicView: View {
             NotchLyricsService.shared.hide()
             service.setQueueVisible(false)
         }
-    }
-
-    private func restingHeight(for size: CGSize) -> CGFloat {
-        let controlsRow = hasControlsRow ? NotchLayout.musicControlsRowHeight + NotchLayout.rowSpacing : 0
-        return max(0, size.height - controlsRow)
     }
 
     private func syncExtras() {

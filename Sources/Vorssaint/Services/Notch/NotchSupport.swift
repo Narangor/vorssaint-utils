@@ -493,11 +493,11 @@ enum NotchLayout {
     /// grown; measuring it again from the growing page made it shrink by the
     /// gap and flicker. Where the island cannot grow enough, as at a custom
     /// size, the player yields to the extra below a legible height.
-    static func musicSplit(height: CGFloat, controlsRow: CGFloat, extras: CGFloat, resting: CGFloat?,
+    static func musicSplit(height: CGFloat, controlsRow: CGFloat, extras: CGFloat, resting: CGFloat,
                            keepsPlayer: Bool, extraOpen: Bool = true) -> (player: CGFloat, extra: CGFloat, showsPlayer: Bool) {
         let page = max(0, height - controlsRow)
         guard extraOpen else { return (page, 0, true) }
-        if keepsPlayer, let resting {
+        if keepsPlayer {
             return (resting, min(extras, max(0, page - resting - rowSpacing)), true)
         }
         let extra = min(extras, page)
@@ -2139,6 +2139,9 @@ struct NotchGeometry: Equatable {
     /// Lyrics and the queue open below the player; custom heights keep them
     /// within the chosen limit and the page swaps the player out instead.
     var musicExtrasHeight: CGFloat { layout == .custom ? min(216, contentBudget) : 216 }
+    /// The player's height at rest. The island keeps this room for it, and
+    /// the page holds it there while lyrics or the queue grow the island.
+    var musicPlayerHeight: CGFloat { NotchLayout.musicPlayerHeight(layout: layout, height: contentBudget) }
 
     func systemRows(cards: Int) -> Int {
         NotchLayout.systemRowRanges(count: cards, width: contentWidth - NotchLayout.systemHoverInset(width: contentWidth) * 2).count
@@ -2194,7 +2197,7 @@ struct NotchGeometry: Equatable {
                 contentHeight = min(budget, home.height == 0 ? NotchLayout.emptyHeight : home.height)
             case .music:
                 let controlsRow = musicHasControlsRow ? NotchLayout.musicControlsRowHeight + NotchLayout.rowSpacing : 0
-                let player = musicHasContent ? NotchLayout.musicPlayerHeight(layout: layout, height: budget) : NotchLayout.musicIdleHeight
+                let player = musicHasContent ? musicPlayerHeight : NotchLayout.musicIdleHeight
                 contentHeight = min(budget, player + controlsRow) + max(0, musicExtraHeight)
             case .system:
                 let cards = max(0, systemCards)
