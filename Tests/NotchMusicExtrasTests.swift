@@ -71,6 +71,13 @@ enum NotchMusicExtrasTests {
                      "the current choice stays listed before loading and when absent from the installed snapshot")
     }
 
+    private final class ScanSignal: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        func signal() { lock.withLock { value = true } }
+        var isSignalled: Bool { lock.withLock { value } }
+    }
+
     private static func preferredPlayerLoading(_ suite: TestSuite) {
         typealias Player = NotchPreferredPlayer
         var finished = false
@@ -80,7 +87,7 @@ enum NotchMusicExtrasTests {
             }
             suite.expect(loaded?.first?.name == "background", "the installed music app scan runs off the main thread")
 
-            let started = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+            let started = ScanSignal(), release = DispatchSemaphore(value: 0)
             let old = Task {
                 await Player.loadInstalled {
                     started.signal()
@@ -91,7 +98,7 @@ enum NotchMusicExtrasTests {
             let deadline = Date().addingTimeInterval(2)
             var didStart = false
             while !didStart, Date() < deadline {
-                didStart = started.wait(timeout: .now()) == .success
+                didStart = started.isSignalled
                 if !didStart { try? await Task.sleep(nanoseconds: 1_000_000) }
             }
             old.cancel()
@@ -101,13 +108,13 @@ enum NotchMusicExtrasTests {
             suite.expect(didStart && stale == nil && current?.first?.bundleID == "org.example.New",
                          "a cancelled screen load discards its late result while a reopened screen can load new choices")
 
-            let scanned = DispatchSemaphore(value: 0)
+            let scanned = ScanSignal()
             let cancelled = Task {
                 withUnsafeCurrentTask { $0?.cancel() }
                 return await Player.loadInstalled { scanned.signal(); return [] }
             }
             let result = await cancelled.value
-            suite.expect(result == nil && scanned.wait(timeout: .now()) == .timedOut,
+            suite.expect(result == nil && !scanned.isSignalled,
                          "a task cancelled before loading does not start an app scan")
             finished = true
         }

@@ -10,6 +10,7 @@ All notable changes to this project are documented here. The format follows
 Dynamic Island opens downloaded files directly, with fixes for Safari downloads, keyboard focus, pasting, brightness keys, Dock previews and Wine audio routing.
 
 ### Dynamic Island
+- With nothing playing, the music page and the Controls card show the playback buttons, and they and the cover open your music app. Choose it in Settings → Dynamic Island → Content → Music → Open when nothing is playing; Automatic opens the music app that played last, then Spotify or Apple Music. Opening it does not start playback.
 - Clicking a completed file's name or icon in Downloads opens it in its default app. The Finder and Shelf buttons remain available.
 - Vorssaint screenshots show the island as it looked when the capture started, like macOS screenshots. Its capture controls and the capture just taken stay out. Settings → Dynamic Island → Behavior → Privacy → Show in screenshots and videos.
 
@@ -37,7 +38,6 @@ Dynamic Island adds audio controls, music shortcuts and battery warnings while u
 ### Dynamic Island
 - Tools uses the quick panel's wand icon, so it is easier to tell apart from the sections button.
 - When hover opens Dynamic Island, you can set how long it waits before closing, from 0.10 to 2 seconds. Settings → Dynamic Island → Behavior → Closing time.
-- With nothing playing, the music page and the Controls card show the playback buttons, and they and the cover open your music app. Choose it in Settings → Dynamic Island → Content → Music → Open when nothing is playing; Automatic opens the music app that played last, then Spotify or Apple Music. Opening it does not start playback.
 - Controls can show a keyboard light slider next to Volume and Brightness, and its icon turns the light off and on. Settings → Dynamic Island → Content → Controls.
 - The mixer puts a microphone fader beside the output, with mute and an editable percentage on supported devices.
 - The music page can switch shuffle beside the playback controls for players that offer it. The first press asks for Automation permission.
