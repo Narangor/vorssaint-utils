@@ -143,6 +143,7 @@ enum DefaultsKey {
     static let releaseNotesOnUpdate = "releaseNotesOnUpdate" // show What's New after an update
     static let appVolumes = "appVolumes"                  // [bundle id: 0...2]
     static let appOutputDevices = "appOutputDevices"      // [bundle id: audio device UID]
+    static let mixerUniversalOutputDevice = "mixerUniversalOutputDevice" // last manual all-apps output UID
     static let mixerShowFinder = "mixerShowFinder"
     static let mixerAppArrangement = "mixerAppArrangement"
     static let mixerHideInactiveApps = "mixerHideInactiveApps"
@@ -549,6 +550,9 @@ enum DefaultsKey {
     static let clipboardHistoryIncludeImagesFiles = "clipboardHistoryIncludeImagesFiles" // capture copied images and files too
     static let clipboardHistoryIgnoredApps = "clipboardHistoryIgnoredApps" // apps whose copies are never saved
     static let clipboardHistoryQuickPreview = "clipboardHistoryQuickPreview"
+    static let clipboardHistoryLayout = "clipboardHistoryLayout" // cards | list, how the history window shows entries
+    static let clipboardHistoryWindowWidth = "clipboardHistoryWindowWidth" // the list window's chosen size
+    static let clipboardHistoryWindowHeight = "clipboardHistoryWindowHeight"
     static let clipboardHistoryMenuBarPreview = "clipboardHistoryMenuBarPreview" // show latest copy next to the menu bar icon
     static let clipboardHistoryMenuBarPreviewLength = "clipboardHistoryMenuBarPreviewLength" // characters shown before truncating
 
@@ -593,7 +597,8 @@ enum DefaultsKey {
     /// The ASCII layout borrowed while the bar is open, restored on close. Off by default
     static let commandBarASCIILayoutEnabled = "commandBarASCIILayoutEnabled"
     static let commandBarUsage = "commandBarUsage"           // per-command run counts, never queries
-    static let commandBarQueryHabits = "commandBarQueryHabits" // keyed query digests → app row ids
+    static let commandBarQueryHabits = "commandBarQueryHabits" // keyed query digests → selected row ids
+    static let commandBarQueryHabitKey = "commandBarQueryHabitKey" // local key for stable digests
     static let commandBarDisabledSources = "commandBarDisabledSources" // kinds of result switched off
     static let commandBarAliases = "commandBarAliases"       // {row id: the name the person gave it}
     static let commandBarPins = "commandBarPins"             // row keys kept at the top, in order
@@ -1495,7 +1500,7 @@ enum Defaults {
         DefaultsKey.notchMascotPalette: NotchMascotPalette.pearl.rawValue,
         DefaultsKey.notchMascotSide: NotchMascotSide.left.rawValue,
         DefaultsKey.notchMascotVisitFrequency: NotchMascotVisitFrequency.normal.rawValue,
-        DefaultsKey.notchMascotHidesWhenIdle: false,
+        DefaultsKey.notchMascotHidesWhenIdle: true,
         DefaultsKey.notchCommandBar: true,
         DefaultsKey.notchCommandBarStyle: NotchCommandBarStyle.droplet.rawValue,
         DefaultsKey.notchHideInCaptures: false,
@@ -1724,6 +1729,9 @@ enum Defaults {
         DefaultsKey.clipboardHistoryIgnoredApps: [String](),
         DefaultsKey.windowLayoutIgnoredApps: [String](),
         DefaultsKey.clipboardHistoryQuickPreview: false,
+        DefaultsKey.clipboardHistoryLayout: ClipboardHistoryLayout.list.rawValue,
+        DefaultsKey.clipboardHistoryWindowWidth: 0.0,
+        DefaultsKey.clipboardHistoryWindowHeight: 0.0,
         DefaultsKey.clipboardHistoryMenuBarPreview: false,
         DefaultsKey.clipboardHistoryMenuBarPreviewLength: Defaults.defaultClipboardMenuBarPreviewLength,
         DefaultsKey.clipboardAutoClearOnDelay: false,

@@ -47,6 +47,17 @@ def availability_declaration(path, prefix):
 
 def main():
     OUTPUT.mkdir(parents=True, exist_ok=True)
+    write("RecorderSystemAudioTapLifecycle.swift", "import CoreAudio\nimport Foundation\n"
+          + "extension RecorderSystemAudioTapLifecycleTests {\nfinal class Tap: Fixture, @unchecked Sendable {\n"
+          + declaration("Sources/Vorssaint/Services/Recorder/RecorderSystemAudioTap.swift", "    func stop() async")
+          + "}\n}\n")
+    watch = "Sources/Vorssaint/Services/Notch/NotchWatchService.swift"
+    write("NotchWatchChoice.swift", "import AppKit\nimport Foundation\n"
+          + "extension NotchWatchChoiceTests {\nfinal class Service: Fixture {\n"
+          + declaration(watch, "    func chooseArea()")
+          + declaration(watch, "    private func watch(").replace("private func", "@MainActor func", 1)
+          + declaration(watch, "    func stop()")
+          + "}\n}\n")
     write("SwitcherAccessibilitySnapshot.swift", "import ApplicationServices\nimport CoreGraphics\nimport Foundation\n"
           + "extension SwitcherAccessibilitySnapshotTests.Reader {\n"
           + "".join(declaration("Sources/Vorssaint/Services/Switcher/WindowEnumerator.swift", prefix)
@@ -155,6 +166,12 @@ def main():
           + declaration(brightness, "    private func step(").replace("private ", "", 1)
           + declaration(brightness, "    private func writeExtendedBrightness(").replace("private ", "", 1)
           + declaration(brightness, "    private static func writeSystemBrightness(").replace("private ", "", 1)
+          + "}\n}\n")
+    write("BrightnessKeyRouting.swift", "import AppKit\nimport os\n"
+          + "extension BrightnessKeyRoutingTests {\nfinal class Service: Fixture {\n"
+          + "".join(declaration(brightness, prefix).replace("private func", "func", 1)
+                    for prefix in ["    private func handleKeyEvent(",
+                                   "    private func routeFunctionKey("])
           + "}\n}\n")
     activator = "Sources/Vorssaint/Services/Switcher/WindowActivator.swift"
     write("SwitcherActivationBodies.swift", "import AppKit\nimport ApplicationServices\n"
@@ -330,6 +347,25 @@ def main():
           + declaration("Sources/Vorssaint/Services/Clipboard/ClipboardHistoryService.swift",
                         "    private func pasteIntoPreviousApp(").replace("private func", "func", 1)
           + "}\n")
+    write("ClipboardPanelPlacement.swift", "import AppKit\n"
+          + "extension ClipboardFeatureTests.PanelPlacementHost {\n"
+          + "".join(declaration(clipboard, prefix).replace("private func", "func", 1) for prefix in [
+              "    private func refreshQuickLayout(", "    private func panelMinimumContentSize(",
+              "    private func preferredPanelSize(", "    private func savePanelSize(",
+              "    private func position("])
+          + "}\nextension ClipboardFeatureTests {\n"
+          + declaration(clipboard, "private final class ClipboardPanelSizeLimit").replace(
+              "private final class", "final class", 1)
+          + "}\n")
+    paste_plain = "Sources/Vorssaint/Services/QuickTools/PastePlainService.swift"
+    write("PastePlain.swift", "import AppKit\nimport UniformTypeIdentifiers\n"
+          + "extension PastePlainTests {\nfinal class Service: Fixture {\n"
+          + "".join(declaration(paste_plain, prefix).replace("private func", "func", 1)
+                    for prefix in ["    func performPastePlain()", "    private func pastePlain(",
+                                   "    static func plainText("])
+          + "}\n}\nextension PastePlainTests.OriginalPasteHost {\n"
+          + declaration("Sources/Vorssaint/Services/TransientPaste.swift", "    func pasteCurrentContents(")
+          + "}\n")
     write("URLCleanerSiteSwitch.swift", "import Foundation\n"
           + "extension RepositoryFeatureTests.URLCleanerSiteSwitchHost {\n"
           + "".join(declaration("Sources/Vorssaint/UI/Settings/URLCleanerSettings.swift",
@@ -388,6 +424,11 @@ def main():
           + declaration("Sources/Vorssaint/Services/Finder/FinderCutPaste.swift", "    static func selectionURLs(")
           + "}\n")
     dock = "Sources/Vorssaint/Services/DockPreview/DockPreviewService.swift"
+    write("DockPreviewScroll.swift", "import AppKit\nimport SwiftUI\n"
+          + "extension DockPreviewScrollTests {\n"
+          + declaration("Sources/Vorssaint/UI/Switcher/DockPreviewPanelView.swift",
+                        "private struct DockPreviewPanelContent:").replace("private struct", "struct", 1)
+          + "}\n")
     write("DockPreviewPosition.swift", "import CoreGraphics\nimport Foundation\n"
           + "extension DockPreviewPositionTests.Service {\n"
           + "".join(declaration(dock, prefix, scope="final class DockPreviewService:")
@@ -457,6 +498,22 @@ def main():
     write("MixerInputVolume.swift", "import Foundation\nimport Combine\nimport CoreAudio\nimport AudioToolbox\n"
           + "extension MixerInputVolumeContract {\n" + input_bodies + "}\n")
     mixer = "Sources/Vorssaint/Services/Audio/AppVolumeMixer.swift"
+    write("MixerUniversalRouting.swift", "import CoreAudio\nimport Foundation\n"
+          + "extension MixerUniversalRoutingContract {\n"
+          + declaration(mixer, "struct MixerApp:") + "}\n"
+          + "extension MixerUniversalRoutingContract.Mixer {\n"
+          + "".join(declaration(mixer, prefix).replace("private ", "", 1) for prefix in [
+              "    private var universalOutputDeviceUID:",
+              "    private static func applyingUniversalOutputRoute(",
+              "    private static func coalescingAppsWithDuplicateIDs(",
+              "    private static func runningAddress(",
+              "    private static func storedVolume(", "    private static func storedRoute(",
+              "    private func storedVolume(", "    private func storedRoute(",
+              "    private func appNeedsEngine(", "    private func rowMayBeTapped(",
+              "    private func applyOutputRoute(", "    func setOutputDeviceUID(",
+              "    func switchToNextSoundOutput(", "    func setUniversalOutputDeviceUID(",
+              "    private func setDefaultOutputDeviceUID("])
+          + "}\n")
     level_watch = declaration(mixer, "final class LevelCompensationWatch {").replace("private ", "")
     for operation in ("AddPropertyListener", "RemovePropertyListener"):
         level_watch = level_watch.replace("AudioObject" + operation + "(", "HAL." + operation + "(")
@@ -600,6 +657,7 @@ def main():
           + declaration(playback_adapter, "    static func readPlaybackState(")
           + declaration(playback_adapter, "    private static func currentPlayerPID(").replace("private static", "static", 1)
           + declaration(playback_adapter, "    static func send(")
+          + declaration(playback_adapter, "    private static func resolvedBundleIdentifier(").replace("private static", "static", 1)
           + declaration(playback_adapter, "    private static func makeTarget(").replace("private static", "static", 1)
           + declaration(adapter_entry, "private func sendPlaybackCommand(").replace("private func", "static func", 1)
           + declaration(adapter_entry, "func encodedReply(").replace("func encodedReply", "static func encodedReply", 1)
@@ -1152,6 +1210,12 @@ def main():
           + "".join(declaration(preview, prefix).replace("private func", "func", 1)
                     for prefix in ["    func shareLink()", "    private func performShare(",
                                    "    private func copySharedLink()", "    private func scheduleAutoDismiss("])
+          + "}\nfinal class Editor: EditorState {\n"
+          + declaration("Sources/Vorssaint/Services/QuickTools/ScreenshotEditorController.swift",
+                        "    func share(duration:")
+          + "}\n@MainActor final class CreationGate: CreationState {\n"
+          + declaration("Sources/Vorssaint/Services/QuickTools/ScreenshotShareService.swift",
+                        "    func createLink(pngData:")
           + "}\n}\n")
     screenshot_service = "Sources/Vorssaint/Services/QuickTools/ScreenshotService.swift"
     write("ScreenshotShortcutCompletion.swift", "import Foundation\n"
@@ -1543,6 +1607,11 @@ def main():
           + "}\n}\n")
 
     downloads = "Sources/Vorssaint/Services/Notch/NotchDownloadService.swift"
+    write("NotchDownloadScan.swift", "import Foundation\n\nextension NotchDownloadScanTests {\n"
+          + "final class Service: Fixture {\n"
+          + declaration(downloads, "    private func scan()").replace("private func", "func", 1)
+          + declaration(downloads, "    private func recordCompletion(").replace("private func", "func", 1)
+          + "}\n}\n")
     write("NotchDownloadFolderChoice.swift", "import Foundation\n\nextension NotchDownloadFolderChoiceContract {\n"
           + "final class Service {\nvar chooser: NSOpenPanel?\nvar chooserID = UUID()\nvar chooserInNotch = false\n"
           + "var folderUnavailable = false\nvar syncs = 0\nvar stops = 0\n"
