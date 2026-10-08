@@ -101,6 +101,7 @@ struct NotchSettings: View {
     @State private var selectedModule = NotchModule.controls
     @State private var draggingModule: NotchModule?
     @State private var draggingControl: NotchControlItem?
+    @State private var preferredPlayers: [NotchPreferredPlayer.Choice]?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     private var text: NotchStrings { FeatureStrings.notch(l10n.language) }
@@ -414,11 +415,15 @@ struct NotchSettings: View {
             SettingsRow(symbol: "arrow.up.forward.app", title: music.preferredPlayer, caption: music.preferredPlayerHint) {
                 Picker(music.preferredPlayer, selection: $preferredPlayer) {
                     Text(music.automaticSource).tag(NotchPreferredPlayer.automatic)
-                    ForEach(NotchPreferredPlayer.installed(including: preferredPlayer), id: \.bundleID) { app in
+                    ForEach(NotchPreferredPlayer.choices(in: preferredPlayers ?? [], including: preferredPlayer), id: \.bundleID) { app in
                         Text(app.name).tag(app.bundleID)
                     }
                 }
                 .labelsHidden()
+            }
+            .task {
+                guard let choices = await NotchPreferredPlayer.loadInstalled(), !Task.isCancelled else { return }
+                preferredPlayers = choices
             }
             SettingsFeatureSwitchRow(symbol: "text.quote", title: music.enableLyrics, isOn: $lyricsEnabled, feature: .notchLyrics)
             if lyricsEnabled, AppFeature.notchLyrics.isAvailable {

@@ -31,14 +31,34 @@ enum NotchPreferredPlayer {
     }
 
     static func remember(_ playback: NotchPlayback?, in sources: [NotchPlaybackSource]) {
-        guard let bundle = playback?.track.appBundleIdentifier,
+        guard let playback, playback.isPlaying, let bundle = playback.track.appBundleIdentifier,
               known.contains(bundle) || sources.contains(where: { $0.bundleIdentifier == bundle && $0.isMusicApp }) else { return }
         lastPlayed = bundle
     }
 
-    /// The apps offered in Settings: the known players that are installed,
-    /// and any other music app. The one chosen stays listed if it is gone.
-    static func installed(including chosen: String = automatic) -> [(bundleID: String, name: String)] {
+    typealias Choice = (bundleID: String, name: String)
+
+    /// The installed choices are a snapshot. A saved choice stays available
+    /// before the scan finishes, or when its app is no longer installed.
+    static func choices(in installed: [Choice], including chosen: String) -> [Choice] {
+        guard !chosen.isEmpty, !installed.contains(where: { $0.bundleID == chosen }) else { return installed }
+        return installed + [(chosen, chosen)]
+    }
+
+    /// Scan away from the view's main thread. A task that left the screen
+    /// while the scan ran cannot publish its late result.
+    static func loadInstalled(using load: @escaping @Sendable () -> [Choice] = { installed() }) async -> [Choice]? {
+        guard !Task.isCancelled else { return nil }
+        let choices = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: load())
+            }
+        }
+        return Task.isCancelled ? nil : choices
+    }
+
+    /// The known players that are installed, and any other music app.
+    static func installed() -> [Choice] {
         var ids = known.filter { InstalledApps.url(for: $0) != nil }
         for app in InstalledApps.installedApplications(includeSystemApplications: true) {
             guard let id = app.bundleID, !ids.contains(id),
@@ -46,7 +66,6 @@ enum NotchPreferredPlayer {
             else { continue }
             ids.append(id)
         }
-        if !chosen.isEmpty, !ids.contains(chosen) { ids.append(chosen) }
         return ids.map { ($0, InstalledApps.name(for: $0)) }
     }
 
