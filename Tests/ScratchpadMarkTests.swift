@@ -280,5 +280,62 @@ enum ScratchpadMarkTests {
         // picks up after a word stays outside the markers.
         expect(applying(.bold, to: "hello world", NSRange(location: 0, length: 6)).text == "**hello** world",
                "a trailing space stays outside the markers")
+
+        // Task lists: `- [ ]` and `- [x]` read as checkboxes, in order, and a
+        // click rewrites exactly the line it belongs to.
+        let source = "- [ ] first\n- [x] done\n- plain\n  - [] nested\n\n```\n- [ ] in code\n```\n> - [ ] quoted\n1. [ ] ordered"
+        let blocks = ScratchpadSupport.markdownPreview(source)
+        let tasks = blocks.compactMap { block -> (Bool, Int, String)? in
+            if case .taskListItem(_, let checked, let index) = block.kind { return (checked, index, String(block.text.characters)) }
+            return nil
+        }
+        expect(tasks.map(\.0) == [false, true, false, false] && tasks.map(\.1) == [0, 1, 2, 3]
+               && tasks.map(\.2) == ["first", "done", "nested", "quoted"],
+               "task items read as checkboxes in order, with the marker off their text, and code and ordered items are not tasks")
+        expect(blocks.contains { $0.kind == .unorderedListItem(depth: 1) && String($0.text.characters) == "plain" },
+               "a list item without a checkbox stays a bullet")
+        expect(ScratchpadSupport.toggleTask(at: 0, in: source)?.hasPrefix("- [x] first\n- [x] done") == true
+               && ScratchpadSupport.toggleTask(at: 1, in: source)?.contains("- [ ] done") == true
+               && ScratchpadSupport.toggleTask(at: 2, in: source)?.contains("  - [x] nested") == true
+               && ScratchpadSupport.toggleTask(at: 3, in: source)?.contains("> - [x] quoted") == true
+               && ScratchpadSupport.toggleTask(at: 3, in: source)?.contains("- [ ] in code") == true,
+               "a click checks or unchecks only its own line, never one inside code")
+        expect(ScratchpadSupport.toggleTask(at: 4, in: source) == nil && ScratchpadSupport.toggleTask(at: 0, in: "no tasks") == nil,
+               "a task that is not there changes nothing")
+        let toggled = ScratchpadSupport.toggleTask(at: 0, in: "- [ ] a\n- [ ] b") ?? ""
+        expect(ScratchpadSupport.toggleTask(at: 0, in: toggled) == "- [ ] a\n- [ ] b",
+               "toggling twice restores the text")
+        expect(ScratchpadSupport.completesEmptyTaskBox(before: "- [") && ScratchpadSupport.completesEmptyTaskBox(before: "  * [")
+               && ScratchpadSupport.completesEmptyTaskBox(before: "> - [") && ScratchpadSupport.completesEmptyTaskBox(before: "+  ["),
+               "a ] typed after a list item's [ closes an empty box")
+        expect(!ScratchpadSupport.completesEmptyTaskBox(before: "[") && !ScratchpadSupport.completesEmptyTaskBox(before: "see [")
+               && !ScratchpadSupport.completesEmptyTaskBox(before: "- text [") && !ScratchpadSupport.completesEmptyTaskBox(before: "- [ ")
+               && !ScratchpadSupport.completesEmptyTaskBox(before: "- "),
+               "a [ anywhere else is left alone")
+
+        // Shift-Return carries a list on, or ends it on an empty item.
+        func lineBreak(_ text: String, caretAt offset: Int? = nil) -> String {
+            let caret = offset ?? (text as NSString).length
+            let edit = ScratchpadSupport.lineBreakEdit(in: text, selection: NSRange(location: caret, length: 0))
+            return (text as NSString).replacingCharacters(in: edit.range, with: edit.replacement)
+        }
+        expect(lineBreak("- [ ] buy milk") == "- [ ] buy milk\n- [ ] "
+               && lineBreak("- [x] done") == "- [x] done\n- [ ] "
+               && lineBreak("  * [] nested") == "  * [] nested\n  * [ ] ",
+               "Shift-Return after a task opens a fresh unchecked task, at the same depth")
+        expect(lineBreak("- item") == "- item\n- " && lineBreak("+ item") == "+ item\n+ "
+               && lineBreak("> - quoted") == "> - quoted\n> - ",
+               "Shift-Return after a bullet opens the same bullet")
+        expect(lineBreak("1. one") == "1. one\n2. " && lineBreak("9) nine") == "9) nine\n10) ",
+               "Shift-Return after a numbered item opens the next number")
+        expect(lineBreak("- [ ] ") == "" && lineBreak("a\n- \nb", caretAt: 4) == "a\n\nb"
+               && lineBreak("1. ") == "",
+               "Shift-Return on an empty item ends the list and takes the marker away")
+        expect(lineBreak("plain text") == "plain text\n" && lineBreak("- [ ] split here", caretAt: 6) == "- [ ] \n- [ ] split here"
+               && lineBreak("- item", caretAt: 1) == "-\n item",
+               "Shift-Return outside a list is a plain line, and inside one splits the item at the caret")
+        let split = ScratchpadSupport.splitCompleted(ScratchpadSupport.markdownPreview("- [ ] a\n- [x] b\n- plain\n- [X] c"))
+        expect(split.open.count == 2 && split.done.map { String($0.text.characters) } == ["b", "c"],
+               "done tasks are set aside from the rest of the document, in order")
     }
 }

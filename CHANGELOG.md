@@ -10,6 +10,7 @@ All notable changes to this project are documented here. The format follows
 The window switcher offers column limits and clearer app filtering. Screenshots copy text, recordings export longer GIFs and isolate window audio, and mixer sliders follow perceived loudness. AI Agents supports OpenCode 2 and safer Claude renewal estimates. Dynamic Island improves lyrics, companion playback and keyboard focus. Cleaning Mode keeps input taps suspended, alongside fixes for volume keys, mouse navigation, Dock instances, M4 Pro temperatures and Command Bar.
 
 ### Added
+- The scratchpad's formatted reading shows `- [ ]` and `- [x]` list items as checkboxes, in the floating pad and on the island. Clicking one checks or unchecks that line in the text. The checkboxes are round and grey like the island's buttons, typing `]` after `- [` makes the empty box `- [ ]`. Tasks that are done are set aside under a closed "Completed" line at the end of the reading, which opens to uncheck them. In the editor, Shift-Return carries a list on with the same bullet, box or next number (and ends it on an empty item), and Command-Return switches to the formatted reading.
 - Dynamic Island can show the keyboard input source when it changes. Command Bar's temporary layout switches stay quiet. Settings → Dynamic Island → Activity → Indicators.
 - The window switcher can limit how many items sit in a row and wraps the rest. Settings → Window switcher → Options → Maximum columns.
 - Screenshot previews can copy the text in a capture when Screen OCR is installed.

@@ -49,7 +49,11 @@ struct NotchScratchpadView: View {
                         PlainTextEditor(text: $pad.text, fontSize: textSize,
                                         textColor: .white,
                                         textContainerInset: Self.editorInset,
-                                        usesFindBar: true) { view in
+                                        usesFindBar: true,
+                                        completesTaskBoxes: true,
+                                        continuesLists: true,
+                                        onCommandReturn: { pad.togglePreview() },
+                                        isActive: !pad.isPreviewing) { view in
                             view.insertionPointColor = .white
                             editor.view = view
                             DispatchQueue.main.async { focusEditor() }
@@ -59,7 +63,11 @@ struct NotchScratchpadView: View {
                         .accessibilityHidden(pad.isPreviewing)
                         if pad.isPreviewing {
                             MarkdownPreview(blocks: ScratchpadSupport.markdownPreview(pad.text),
-                                            baseSize: textSize)
+                                            baseSize: textSize,
+                                            completedLabel: text.completedTasks,
+                                            onToggleTask: { index in
+                                                if let updated = ScratchpadSupport.toggleTask(at: index, in: pad.text) { pad.text = updated }
+                                            })
                         } else if pad.text.isEmpty {
                             Text(text.placeholder)
                                 .font(.system(size: textSize))

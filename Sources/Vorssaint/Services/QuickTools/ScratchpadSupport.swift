@@ -37,6 +37,8 @@ struct ScratchpadMarkdownBlock {
         case paragraph
         case heading(Int)
         case unorderedListItem(depth: Int)
+        /// A `- [ ]` or `- [x]` item; `index` counts the tasks of the document in order.
+        case taskListItem(depth: Int, checked: Bool, index: Int)
         case orderedListItem(ordinal: Int, depth: Int)
         case quote(depth: Int)
         case code
@@ -273,12 +275,151 @@ enum ScratchpadSupport {
             currentText.append(AttributedString(parsed[run.range]))
         }
         finishBlock()
+        blocks = withTasks(blocks)
 
         return blocks.isEmpty
             ? [ScratchpadMarkdownBlock(kind: .paragraph,
                                        containerID: nil,
                                        text: AttributedString(text))]
             : blocks
+    }
+
+    /// The checkbox opening a list item's text: `[ ]`, `[x]` or `[X]`, and
+    /// the bare `[]` that is easy to type, followed by a space or the end.
+    private static func taskMarker(in text: String) -> (checked: Bool, length: Int)? {
+        let characters = Array(text.prefix(4))
+        func closes(_ at: Int) -> Bool { characters.count == at || characters[at] == " " || characters[at] == "\t" }
+        guard characters.first == "[" else { return nil }
+        if characters.count > 1, characters[1] == "]", closes(2) { return (false, 2) }
+        if characters.count > 2, characters[2] == "]", closes(3) {
+            if characters[1] == " " { return (false, 3) }
+            if characters[1] == "x" || characters[1] == "X" { return (true, 3) }
+        }
+        return nil
+    }
+
+    /// Turns the list items that open with a checkbox into tasks, numbered in
+    /// reading order, which is also the order of their lines in the text.
+    private static func withTasks(_ blocks: [ScratchpadMarkdownBlock]) -> [ScratchpadMarkdownBlock] {
+        var index = 0
+        return blocks.map { block in
+            guard case .unorderedListItem(let depth) = block.kind else { return block }
+            let plain = String(block.text.characters)
+            guard let marker = taskMarker(in: plain) else { return block }
+            var rest = block.text
+            let start = rest.characters.startIndex
+            var end = rest.characters.index(start, offsetBy: marker.length)
+            if end < rest.characters.endIndex, rest.characters[end] == " " || rest.characters[end] == "\t" {
+                end = rest.characters.index(after: end)
+            }
+            rest.removeSubrange(start..<end)
+            defer { index += 1 }
+            return ScratchpadMarkdownBlock(kind: .taskListItem(depth: depth, checked: marker.checked, index: index),
+                                           containerID: block.containerID, text: rest)
+        }
+    }
+
+    static let taskScheme = "vorssaint-task"
+    /// The link on the line that opens and closes the completed tasks.
+    static let completedScheme = "vorssaint-completed"
+
+    /// The tasks already done, which the formatted reading sets aside, and the
+    /// rest of the document, which keeps its order.
+    static func splitCompleted(_ blocks: [ScratchpadMarkdownBlock])
+        -> (open: [ScratchpadMarkdownBlock], done: [ScratchpadMarkdownBlock]) {
+        var open: [ScratchpadMarkdownBlock] = []
+        var done: [ScratchpadMarkdownBlock] = []
+        for block in blocks {
+            if case .taskListItem(_, true, _) = block.kind { done.append(block) } else { open.append(block) }
+        }
+        return (open, done)
+    }
+
+    private static let listMarker = try? NSRegularExpression(
+        pattern: #"^([ \t]*(?:>[ \t]*)*)([-*+]|\d+[.)])([ \t]+)(\[[ xX]?\][ \t]+)?"#)
+
+    /// What Shift-Return does with the caret at `caret`: in a list item it
+    /// opens the next one, with the same marker, a fresh unchecked box for a
+    /// task and the next number for a numbered item; on an empty item it ends
+    /// the list instead; anywhere else it is a plain line break. `range` is
+    /// what is replaced and `caret` the offset after the edit.
+    static func lineBreakEdit(in text: String, selection: NSRange) -> (range: NSRange, replacement: String, caret: Int) {
+        let plain = (range: selection, replacement: "\n", caret: selection.location + 1)
+        let whole = text as NSString
+        guard selection.length == 0, selection.location <= whole.length, let listMarker else { return plain }
+        let line = whole.lineRange(for: NSRange(location: selection.location, length: 0))
+        var content = line
+        while content.length > 0, "\n\r".contains(whole.substring(with: NSRange(location: NSMaxRange(content) - 1, length: 1))) {
+            content.length -= 1
+        }
+        let lineText = whole.substring(with: content)
+        guard let match = listMarker.firstMatch(in: lineText, range: NSRange(location: 0, length: (lineText as NSString).length))
+        else { return plain }
+        let markerEnd = content.location + match.range.length
+        guard selection.location >= markerEnd else { return plain }
+        let lineNS = lineText as NSString
+        let prefix = lineNS.substring(with: match.range(at: 1))
+        let marker = lineNS.substring(with: match.range(at: 2))
+        let spacing = lineNS.substring(with: match.range(at: 3))
+        let hasBox = match.range(at: 4).location != NSNotFound
+        if selection.location == NSMaxRange(content), match.range.length == lineNS.length || lineNS.substring(from: match.range.length).trimmingCharacters(in: .whitespaces).isEmpty {
+            // An empty item: the list ends, and the marker goes.
+            return (content, "", content.location)
+        }
+        var next = marker
+        if let digits = Int(marker.dropLast()), let delimiter = marker.last { next = "\(digits + 1)\(delimiter)" }
+        let replacement = "\n" + prefix + next + spacing + (hasBox ? "[ ] " : "")
+        return (selection, replacement, selection.location + (replacement as NSString).length)
+    }
+
+    /// Whether `before`, the text of a line up to the caret, ends with the
+    /// `[` of a list item's checkbox, so that a `]` typed next closes an
+    /// empty box: `- [`, `  * [`, `> - [`.
+    static func completesEmptyTaskBox(before: String) -> Bool {
+        guard before.hasSuffix("["), let marker = taskLine else { return false }
+        let box = before + " ]"
+        return marker.firstMatch(in: box, range: NSRange(box.startIndex..., in: box)) != nil
+    }
+
+    private static let taskLine = try? NSRegularExpression(pattern: #"^[\s>]*[-*+][ \t]+\[( |x|X)?\]([ \t]|$)"#)
+
+    /// The text with the `index`th task checked or unchecked, or nil when
+    /// there is no such task. Lines inside fenced code are not tasks, as the
+    /// preview does not count them.
+    static func toggleTask(at index: Int, in text: String) -> String? {
+        guard let taskLine else { return nil }
+        var lines = text.components(separatedBy: "\n")
+        var count = 0
+        var fence: Character?
+        for position in lines.indices {
+            let line = lines[position]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                if fence == nil { fence = trimmed.first } else if trimmed.first == fence { fence = nil }
+                continue
+            }
+            guard fence == nil else { continue }
+            let whole = NSRange(line.startIndex..., in: line)
+            guard let match = taskLine.firstMatch(in: line, range: whole) else { continue }
+            defer { count += 1 }
+            guard count == index else { continue }
+            // The bracket content is the character before the closing bracket.
+            let box = match.range(at: 1)
+            let symbols = line as NSString
+            let isChecked = box.location != NSNotFound && symbols.substring(with: box).lowercased() == "x"
+            let closing = line.range(of: "]", range: line.index(line.startIndex, offsetBy: 0)..<line.endIndex)
+            guard let closing else { return nil }
+            var updated = line
+            if box.location == NSNotFound {
+                updated.replaceSubrange(closing.lowerBound..<closing.lowerBound, with: "x")
+            } else {
+                let from = updated.index(updated.startIndex, offsetBy: box.location)
+                updated.replaceSubrange(from..<updated.index(after: from), with: isChecked ? " " : "x")
+            }
+            lines[position] = updated
+            return lines.joined(separator: "\n")
+        }
+        return nil
     }
 
     private static func markdownBlockPresentation(

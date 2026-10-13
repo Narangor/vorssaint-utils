@@ -107,6 +107,8 @@ enum NotchCompactTests {
     struct MarkdownPreview: View {
         let blocks: [ScratchpadMarkdownBlock]
         var baseSize: CGFloat = 13
+        var completedLabel = "Completed"
+        var onToggleTask: ((Int) -> Void)?
         var body: some View { Color.clear }
     }
     struct Music { var playback: Bool? = true }
