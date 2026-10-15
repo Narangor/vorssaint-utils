@@ -3564,6 +3564,11 @@ enum ScreenshotFeatureTests {
         ]
         suite.expect(scratchpadHitTargetContracts.allSatisfy { scratchpadViewSource.contains($0) },
                "the scratchpad tab bar and header controls keep their full padded hit targets")
+        // The island's toggle runs in NotchCompactTests; the floating pad hands
+        // its checkboxes to the same service method, which edits through the
+        // registered text view.
+        suite.expect(scratchpadViewSource.contains("onToggleTask: { service.toggleTask(box: $0) }"),
+               "the floating pad's checkboxes edit through the service, so a click is one undoable edit")
         suite.expect(ScratchpadRetention.sanitized("day") == .day
                 && ScratchpadRetention.sanitized("week") == .week
                 && ScratchpadRetention.sanitized("month") == .month

@@ -24,8 +24,8 @@ struct NotchScratchpadView: View {
     private static let editorInset = NSSize(width: 6, height: 6)
 
     /// Holds the editor's text view so a tab change can aim the caret at it
-    /// and a clear can go through its undo. Weak, since the view belongs to
-    /// the editor.
+    /// and a clear or a checkbox click can go through its undo. Weak, since
+    /// the view belongs to the editor.
     private final class EditorHandle {
         weak var view: NSTextView?
     }
@@ -64,10 +64,8 @@ struct NotchScratchpadView: View {
                         if pad.isPreviewing {
                             MarkdownPreview(blocks: ScratchpadSupport.markdownPreview(pad.text),
                                             baseSize: textSize,
-                                            completedLabel: text.completedTasks,
-                                            onToggleTask: { index in
-                                                if let updated = ScratchpadSupport.toggleTask(at: index, in: pad.text) { pad.text = updated }
-                                            })
+                                            taskStates: (done: text.taskDone, notDone: text.taskNotDone),
+                                            onToggleTask: { pad.toggleTask(box: $0, through: editor.view) })
                         } else if pad.text.isEmpty {
                             Text(text.placeholder)
                                 .font(.system(size: textSize))
