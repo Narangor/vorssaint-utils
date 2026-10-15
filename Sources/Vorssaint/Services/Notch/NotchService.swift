@@ -139,6 +139,7 @@ final class NotchService: ObservableObject {
     @Published private(set) var captureActions: AnyView?
     /// The clipboard page keeps its filter here, and the header's magnifier asks
     /// it to open the search, so both can sit in the header and not in the page.
+    /// The filter lasts one opening, as it did while the page kept it.
     @Published var clipboardPinnedOnly = false
     @Published private(set) var clipboardSearchRequest = 0
     func requestClipboardSearch() { clipboardSearchRequest += 1 }
@@ -784,7 +785,8 @@ final class NotchService: ObservableObject {
 
     private func previewGeometry(for module: NotchModule, sectionsButton: Bool) -> NotchGeometry {
         var result = geometry
-        result.headerTitleWidth = NotchLayout.headerTitleWidth(module.title(L10n.shared.language), button: sectionsButton)
+        result.headerTitleWidth = NotchLayout.pageTitleWidth(module.title(L10n.shared.language), module: module,
+                                                             button: sectionsButton, in: result)
         return result
     }
 
@@ -844,16 +846,24 @@ final class NotchService: ObservableObject {
         result.headerTitleWidth = headerTitleWidth
         return result
     }
-    /// The open header's title and the button before it, as the header draws
+    /// The open header's title with the buttons around it, as the header draws
     /// them. Choosing a section shows only its search beside the camera, which
     /// takes the room its side leaves.
     private var headerTitleWidth: CGFloat {
         guard !showingSections else { return 0 }
         let detail = showingAppPanel || selectedMetric != nil
         guard detail || modules.isEmpty else {
-            return NotchLayout.headerTitleWidth(selected.title(L10n.shared.language), button: headerShowsSectionsButton)
+            return NotchLayout.pageTitleWidth(selected.title(L10n.shared.language), module: selected,
+                                              button: headerShowsSectionsButton, in: geometry)
         }
         return NotchLayout.headerTitleWidth(detailTitle, font: NotchLayout.detailTitleFont, button: detail)
+    }
+    /// Whether the clipboard page's header draws the magnifier after its title,
+    /// as `headerTitleWidth` counts it. Where only the title fits beside the
+    /// camera, the header's menu offers Search instead.
+    var clipboardHeaderShowsSearch: Bool {
+        NotchLayout.pageShowsSearch(selected.title(L10n.shared.language), module: selected,
+                                    button: headerShowsSectionsButton, in: geometry)
     }
     /// A detail's title, the app panel's, or the island's own with no sections.
     var detailTitle: String {
@@ -1211,6 +1221,7 @@ final class NotchService: ObservableObject {
         captureControlsWork?.cancel(); captureControlsWork = nil
         musicDetailVisible = false
         pageLayers.removeAll()
+        clipboardPinnedOnly = false
         panel?.handleScroll = nil
         gesture = NotchGestureSupport()
         sectionScroll = NotchSectionScroll()
@@ -1391,6 +1402,7 @@ final class NotchService: ObservableObject {
         let closesCommandBar = showingCommandBar
         hoverState.close(pointerInside: windowHost?.containsHover(NSEvent.mouseLocation) == true)
         pinned = false
+        clipboardPinnedOnly = false
         hoverWork?.cancel(); hoverWork = nil
         if noticeExpanded { noticeWork?.cancel(); noticeWork = nil }
         let mascotFrom = mascotBridgeStart(opening: false)

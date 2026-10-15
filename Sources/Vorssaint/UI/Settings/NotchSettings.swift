@@ -56,7 +56,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchBattery) private var battery = true
     @AppStorage(DefaultsKey.notchClipboard) private var clipboard = true
     @AppStorage(DefaultsKey.notchClipboardWindow) private var clipboardWindow = true
-    @AppStorage(DefaultsKey.notchClipboardCardSize) private var clipboardCardSize = NotchClipboardCardSize.compact.rawValue
+    @AppStorage(DefaultsKey.notchClipboardCardSize) private var clipboardCardSize = NotchClipboardCardSize.comfortable.rawValue
     @AppStorage(DefaultsKey.screenshotDefaultAction) private var captureAction = ""
     @AppStorage(DefaultsKey.notchCapture) private var capture = true
     @AppStorage(DefaultsKey.notchTrackChange) private var trackChange = true
@@ -488,14 +488,19 @@ struct NotchSettings: View {
             switchRow("doc.on.clipboard", text.clipboardActivity, caption: text.privacy, isOn: $clipboard)
             if clipboardWindow, AppFeature.clipboardHistory.isAvailable {
                 let size = FeatureStrings.notchClipboardSize(l10n.language)
-                SettingsRow(symbol: "rectangle.compress.vertical", title: size.entrySize, caption: size.hint) {
-                    Picker(size.entrySize, selection: $clipboardCardSize) {
-                        Text(size.compact).tag(NotchClipboardCardSize.compact.rawValue)
-                        Text(size.comfortable).tag(NotchClipboardCardSize.comfortable.rawValue)
+                VStack(alignment: .leading, spacing: 6) {
+                    // Read as the page reads it, so a value it does not know shows comfortable here too.
+                    SettingsChoiceRow(symbol: "rectangle.compress.vertical", title: size.entrySize,
+                                      selection: Binding(get: { NotchClipboardCardSize(stored: clipboardCardSize) },
+                                                         set: { clipboardCardSize = $0.rawValue })) {
+                        Text(size.compact).tag(NotchClipboardCardSize.compact)
+                        Text(size.comfortable).tag(NotchClipboardCardSize.comfortable)
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .fixedSize()
+                    Text(size.hint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.leading, settingsRowTextInset)
                 }
             }
         case .captures:

@@ -5,7 +5,7 @@ import SwiftUI
 
 /// The history as a vertical list of cards, with everything the panel's list
 /// and the quick panel offer on each: paste or copy, pin, move, delete, and
-/// the recent ones cleared in one go from the search row.
+/// the recent ones cleared in one go from the island's header.
 struct NotchClipboardView: View {
     @ObservedObject var service: NotchService
     let size: CGSize
@@ -19,25 +19,29 @@ struct NotchClipboardView: View {
         get { service.clipboardPinnedOnly }
         nonmutating set { service.clipboardPinnedOnly = newValue }
     }
-    /// The card the arrow keys chose from the search field, or the top result
-    /// of a typed search; Return uses it the way a click would.
+    /// The card the arrow keys chose, the top result of a typed search, or
+    /// the entry copied last; Return uses it the way a click would.
     @State private var highlightedID: UUID?
     @FocusState private var searching: Bool
-    /// The search field shows only once it is wanted: the magnifier opens it,
-    /// pointing at the magnifier opens it, and so does typing a letter.
+    /// The search field shows only once it is wanted: the header's magnifier
+    /// opens it, and so does typing. Hidden, it keeps the focus.
     @State private var searchOpen = false
-    @AppStorage(DefaultsKey.notchClipboardCardSize) private var cardSize = NotchClipboardCardSize.compact.rawValue
+    @AppStorage(DefaultsKey.notchClipboardCardSize) private var cardSize = NotchClipboardCardSize.comfortable.rawValue
     /// The entry under the pointer, and the one it has rested on long enough to open.
     @State private var hoveredID: UUID?
     @State private var expandedID: UUID?
-    @State private var dwellTask: Task<Void, Never>?
-    @State private var collapseTask: Task<Void, Never>?
+    /// The entry the pointer rests on until it opens, and the open entry the
+    /// pointer left until it closes.
+    @State private var dwell: (id: UUID, task: Task<Void, Never>)?
+    @State private var closing: (id: UUID, task: Task<Void, Never>)?
     /// The entry the arrow keys have rested on long enough to open, once they have moved.
     @State private var keyExpandedID: UUID?
     @State private var keysMoved = false
     @Environment(\.notchSettingsPreview) private var preview
+    @Environment(\.notchGlassSurface) private var glassSurface
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var text: ClipboardFeatureStrings { FeatureStrings.clipboard(l10n.language) }
+    private static let listSpace = "notch.clipboard.list"
 
     private var entries: [ClipboardHistoryEntry] {
         history.filteredEntries(matching: query).filter { !pinnedOnly || $0.isPinned }
@@ -57,8 +61,8 @@ struct NotchClipboardView: View {
     }
 
     var body: some View {
-        VStack(spacing: NotchLayout.rowSpacing) {
-            header
+        VStack(spacing: searchOpen ? NotchLayout.rowSpacing : 0) {
+            searchField
             if !enabled, history.entries.isEmpty {
                 // The panel offers the switch beside its caption; the page
                 // says why it is empty and turns the history on from here.
@@ -78,28 +82,18 @@ struct NotchClipboardView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 8) {
+                        LazyVStack(spacing: NotchLayout.clipboardCardSpacing) {
                             ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                                card(entry, place: index)
-                                    .frame(height: cardHeight(entry))
-                                    .onHover { hover(entry, $0) }
+                                row(entry, place: index)
                                     .id(entry.id)
                             }
                         }
                     }
                     .scrollIndicators(.automatic)
-                    // An entry that opens may reach past the edge of the list.
-                    .onChange(of: openedID) { _, id in
+                    .coordinateSpace(.named(Self.listSpace))
+                    .onChange(of: highlightedID) { previous, id in
                         guard let id else { return }
-                        Task { @MainActor in
-                            try? await Task.sleep(for: .milliseconds(220))
-                            guard openedID == id else { return }
-                            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(id) }
-                        }
-                    }
-                    .onChange(of: highlightedID) { _, id in
-                        guard let id else { return }
-                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(id) }
+                        follow(id, from: previous, in: proxy)
                     }
                     // A copied recent entry moves to the top, so the list
                     // follows it and the tick stays in view.
@@ -111,9 +105,7 @@ struct NotchClipboardView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // A new search starts from its top result instead of a row it hid,
-        // and a row that leaves the list hands the highlight on the same way.
-        .onChange(of: query) { _, _ in keysMoved = false; highlightedID = searchHighlight(keeping: nil) }
+        .onChange(of: query) { _, query in queryChanged(query) }
         // Resting on an entry with the arrow keys opens it, as resting the pointer does.
         .task(id: highlightedID) {
             keyExpandedID = nil
@@ -124,13 +116,13 @@ struct NotchClipboardView: View {
         }
         .background {
             if !preview {
-                ClipboardKeyMonitor { handleKey(keyCode: $0, characters: $1, hasCommandModifier: $2, editing: $3) }
+                ClipboardKeyMonitor(handleKey: {
+                    handleKey(keyCode: $0, characters: $1, modifiers: $2, composing: $3, editing: $4)
+                }, composed: { searchOpen = true })
                     .frame(width: 0, height: 0)
             }
         }
-        // The page opens on the entry copied last, so Return pastes it
-        // and the arrows move from it.
-        .onAppear { if !preview { highlightedID = searchHighlight(keeping: nil) } }
+        .onAppear(perform: appeared)
         .onChange(of: service.clipboardSearchRequest) { _, _ in if !preview { openSearch() } }
         .onChange(of: pinnedOnly) { _, _ in highlightedID = searchHighlight(keeping: nil) }
         .onChange(of: searchOpen) { _, open in
@@ -142,7 +134,12 @@ struct NotchClipboardView: View {
             // A field left empty has nothing to keep open.
             if !focused, query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { searchOpen = false }
         }
-        .onDisappear { if !preview { service.setPageLayer(.clipboard, close: nil) } }
+        .onDisappear {
+            dwell?.task.cancel()
+            closing?.task.cancel()
+            if !preview { service.setPageLayer(.clipboard, close: nil) }
+        }
+        // A row that leaves the list hands the highlight on, as a new search does.
         .onChange(of: entries.map(\.id)) { _, _ in highlightedID = searchHighlight(keeping: highlightedID) }
         .onChange(of: service.clipboardPastePress) { _, press in
             guard let press, !preview else { return }
@@ -162,65 +159,166 @@ struct NotchClipboardView: View {
         }
     }
 
-    private var comfortable: Bool { cardSize == NotchClipboardCardSize.comfortable.rawValue }
+    /// The page opens on the entry copied last, so Return pastes it and the
+    /// arrows move from it. Typing filters it from the first key, as in
+    /// Explore: the field takes the focus while it is still hidden.
+    private func appeared() {
+        guard !preview else { return }
+        highlightedID = searchHighlight(keeping: nil)
+        searching = true
+    }
 
-    private func isExpanded(_ entry: ClipboardHistoryEntry) -> Bool {
-        comfortable || expandedID == entry.id || keyExpandedID == entry.id
+    /// The list follows the highlight the least that shows it whole. With no
+    /// highlight before it, the list has just appeared at its top, as when the
+    /// page opens, and the pinned entries above the highlight keep their room:
+    /// the list stays there while half a compact entry's height of the
+    /// highlighted one shows, a comfortable one's first line or a compact
+    /// one's outline and top, and otherwise moves by whole entries, the
+    /// fewest that show that much, so the entry at its top is never cut.
+    private func follow(_ id: UUID, from previous: UUID?, in proxy: ScrollViewProxy) {
+        var target = id, anchor: UnitPoint?
+        if previous == nil {
+            let list = size.height - (searchOpen ? NotchLayout.clipboardSearchHeight + NotchLayout.rowSpacing : 0)
+            guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+            let rows = NotchSupport.clipboardOpeningScroll(index: index, rowHeight: rowHeight,
+                                                           spacing: NotchLayout.clipboardCardSpacing,
+                                                           shown: NotchLayout.clipboardCompactCardHeight / 2,
+                                                           visibleHeight: list)
+            guard rows > 0 else { return }
+            target = entries[rows].id
+            anchor = .top
+        }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { proxy.scrollTo(target, anchor: anchor) }
+    }
+
+    /// A new search starts from its top result instead of a row it hid. Text
+    /// that reaches the hidden field, pasted into it too, shows it.
+    private func queryChanged(_ query: String) {
+        keysMoved = false
+        highlightedID = searchHighlight(keeping: nil)
+        if !query.isEmpty { searchOpen = true }
+    }
+
+    /// The size Settings chose, read the way Settings reads it.
+    private var comfortable: Bool {
+        NotchClipboardCardSize(stored: cardSize) == .comfortable
     }
 
     /// The entry that is open, by the pointer or by the keys.
     private var openedID: UUID? { expandedID ?? keyExpandedID }
 
-    /// A comfortable entry is always the same height; a compact one is short until it opens
-    /// and then as tall as its text or image asks.
-    private func cardHeight(_ entry: ClipboardHistoryEntry) -> CGFloat {
-        if comfortable { return NotchLayout.clipboardCardHeight }
-        guard isExpanded(entry) else { return NotchLayout.clipboardCompactCardHeight }
-        let width = size.width - 40
+    /// A row keeps its height while its entry is open: the open entry is drawn
+    /// over the rows around it, so none of them moves under a resting pointer.
+    private var rowHeight: CGFloat {
+        comfortable ? NotchLayout.clipboardCardHeight : NotchLayout.clipboardCompactCardHeight
+    }
+
+    private func row(_ entry: ClipboardHistoryEntry, place: Int) -> some View {
+        let open = !comfortable && openedID == entry.id
+        return card(entry) {
+            if comfortable { expandedCard(entry, place: place) } else { compactCard(entry, place: place) }
+        }
+        .frame(height: rowHeight)
+        .accessibilityHidden(open)
+        .overlay(alignment: .top) {
+            if open { openCard(entry, place: place) }
+        }
+        // One region for the row and the entry open over it, drawn above the rows it covers.
+        .onHover { hover(entry, $0) }
+        .zIndex(open ? 1 : 0)
+    }
+
+    /// The open entry, from its row's top and moved only as far as it takes
+    /// to show all of it within the list. It is lifted over the rows it
+    /// covers and casts a soft shadow on them. Beneath it, a backing one
+    /// point wider all around edges it the way a window lifted over others is
+    /// edged, its corners following the card's own: it covers what those
+    /// corners leave of a covered row, whose text starts 10 points in, where
+    /// they still leave almost a point.
+    private func openCard(_ entry: ClipboardHistoryEntry, place: Int) -> some View {
+        GeometryReader { proxy in
+            let visible = proxy.bounds(of: .named(Self.listSpace))?.height ?? size.height
+            let height = min(openHeight(entry), visible)
+            card(entry, lifted: true) { expandedCard(entry, place: place) }
+                .frame(height: height)
+                .background {
+                    let backing = RoundedRectangle(cornerRadius: 14, style: .continuous).inset(by: -1)
+                    Group {
+                        if glassSurface { backing.fill(.ultraThickMaterial) } else { backing.fill(.black) }
+                    }
+                    .shadow(color: .black.opacity(0.5), radius: 10, y: 4)
+                }
+                .offset(y: NotchSupport.clipboardOpenOffset(rowTop: proxy.frame(in: .named(Self.listSpace)).minY,
+                                                            rowHeight: proxy.size.height,
+                                                            height: height, visibleHeight: visible))
+        }
+    }
+
+    /// An open entry is as tall as its text or image asks.
+    private func openHeight(_ entry: ClipboardHistoryEntry) -> CGFloat {
         switch entry.kind {
         case .text:
-            return max(NotchLayout.clipboardCompactCardHeight, NotchClipboardCardSize.openHeight(text: openText(entry), width: width))
+            return max(NotchLayout.clipboardCompactCardHeight,
+                       NotchClipboardCardSize.openHeight(text: openText(entry), width: openTextWidth(entry), id: entry.id))
         case .image:
-            return NotchClipboardCardSize.openHeight(aspectRatio: entry.imageAspectRatio.map { CGFloat($0) }, width: width)
+            return NotchClipboardCardSize.openHeight(aspectRatio: entry.imageAspectRatio.map { CGFloat($0) },
+                                                     width: size.width - 40)
         case .files:
             return NotchLayout.clipboardCardHeight
         }
     }
 
-    /// The text an open entry shows: its own line breaks, and no more than a few lines of it.
+    /// The width an open entry's text wraps in: the card less its padding and
+    /// any color swatch, and less a scroll bar where one takes room.
+    private func openTextWidth(_ entry: ClipboardHistoryEntry) -> CGFloat {
+        let scroller = NSScroller.preferredScrollerStyle == .legacy
+            ? NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy) : 0
+        return size.width - 2 * 10 - (entry.color == nil ? 0 : 12 + 7) - scroller
+    }
+
+    /// The text an open entry shows: the card preview the quick panel's cards
+    /// show, its line breaks kept and blank lines around it trimmed, and no
+    /// more than a few lines of it.
     private func openText(_ entry: ClipboardHistoryEntry) -> String {
-        String(entry.text.prefix(NotchClipboardCardSize.maximumOpenLines * 120))
+        String(entry.cardPreview.prefix(NotchClipboardCardSize.maximumOpenLines * 120))
     }
 
     private func setOpen(keyID: UUID?) {
         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { keyExpandedID = keyID }
     }
 
-    /// A compact entry opens once the pointer has rested on it. Leaving closes it after a
-    /// moment, so the pointer crossing the card as it changes shape does not close it.
+    /// A compact entry opens once the pointer has rested on it and closes a
+    /// moment after the pointer leaves it. Only coming back to that entry
+    /// keeps it open; resting on another one or leaving the list closes it.
     private func hover(_ entry: ClipboardHistoryEntry, _ inside: Bool) {
         guard !preview, !comfortable else { return }
         if inside {
-            collapseTask?.cancel()
-            dwellTask?.cancel()
+            if closing?.id == entry.id {
+                closing?.task.cancel()
+                closing = nil
+            }
+            dwell?.task.cancel()
+            dwell = nil
             hoveredID = entry.id
             guard expandedID != entry.id else { return }
-            dwellTask = Task { @MainActor in
+            dwell = (entry.id, Task { @MainActor in
                 try? await Task.sleep(for: .seconds(NotchClipboardCardSize.dwell))
                 guard !Task.isCancelled, hoveredID == entry.id else { return }
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { expandedID = entry.id }
-            }
+            })
         } else {
-            dwellTask?.cancel()
-            collapseTask?.cancel()
-            collapseTask = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(150))
-                guard !Task.isCancelled else { return }
-                if hoveredID == entry.id { hoveredID = nil }
-                if expandedID == entry.id {
-                    withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { expandedID = nil }
-                }
+            if dwell?.id == entry.id {
+                dwell?.task.cancel()
+                dwell = nil
             }
+            if hoveredID == entry.id { hoveredID = nil }
+            guard expandedID == entry.id else { return }
+            closing?.task.cancel()
+            closing = (entry.id, Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(150))
+                guard !Task.isCancelled, expandedID == entry.id else { return }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.18)) { expandedID = nil }
+            })
         }
     }
 
@@ -242,20 +340,32 @@ struct NotchClipboardView: View {
         entry.kind == .image ? "photo" : entry.kind == .files ? "doc" : "text.alignleft"
     }
 
-    private func card(_ entry: ClipboardHistoryEntry, place: Int) -> some View {
-        Group {
-            if isExpanded(entry) { expandedCard(entry, place: place) } else { compactCard(entry, place: place) }
-        }
-        .modifier(NotchControlSurface(cornerRadius: 14, selected: entry.isPinned))
-        .overlay {
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(.white.opacity(highlightedID == entry.id ? 0.34 : 0), lineWidth: 1)
+    /// The surface an entry sits on, with its menu and actions. An open entry
+    /// is lifted over the rows around it, which must not show through it: an
+    /// opaque surface a step lighter than theirs and edged by a hairline, so
+    /// the rows it covers read as underneath. On a frosted pane it lies on
+    /// Liquid Glass instead, as an opaque gray would stand out of the glass.
+    private func card<Content: View>(_ entry: ClipboardHistoryEntry, lifted: Bool = false,
+                                     @ViewBuilder content: () -> Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        return content()
+            .modifier(NotchControlSurface(cornerRadius: 14, selected: entry.isPinned))
+            .background {
+                if lifted {
+                    if glassSurface { shape.fill(.ultraThickMaterial) } else { shape.fill(Color(white: 0.09)) }
+                }
+            }
+            .overlay {
+                ZStack {
+                    if lifted { shape.strokeBorder(.white.opacity(0.14), lineWidth: 0.5) }
+                    shape.strokeBorder(.white.opacity(highlightedID == entry.id ? 0.34 : 0), lineWidth: 1)
+                }
                 .allowsHitTesting(false)
-        }
-        .clipped()
-        .contextMenu { actions(entry) }
-        .accessibilityAction(named: Text(text.moveUp)) { move(entry, .up) }
-        .accessibilityAction(named: Text(text.moveDown)) { move(entry, .down) }
+            }
+            .clipped()
+            .contextMenu { actions(entry) }
+            .accessibilityAction(named: Text(text.moveUp)) { move(entry, .up) }
+            .accessibilityAction(named: Text(text.moveDown)) { move(entry, .down) }
     }
 
     /// One or two lines, with the actions shown only for the entry in use.
@@ -264,7 +374,7 @@ struct NotchClipboardView: View {
         return HStack(spacing: 8) {
             Button { activate(entry) } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: kindSymbol(entry)).font(.system(size: 10)).foregroundStyle(.secondary)
+                    leadingIcon(entry)
                     preview(entry, compact: true)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         .clipped()
@@ -296,6 +406,22 @@ struct NotchClipboardView: View {
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
+    /// What a compact row leads with: the files' own icon, the one Finder
+    /// shows for their type, or the glyph of the kind of entry. All of them
+    /// take one column, so the rows' text lines up.
+    private func leadingIcon(_ entry: ClipboardHistoryEntry) -> some View {
+        Group {
+            if entry.kind == .files, let icon = ClipboardFileIcons.icon(for: entry.filePaths) {
+                // VoiceOver reads the name beside it, which says all the icon does.
+                Image(nsImage: icon).resizable().interpolation(.high).frame(width: 14, height: 14)
+                    .accessibilityHidden(true)
+            } else {
+                Image(systemName: kindSymbol(entry)).font(.system(size: 10)).foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 14)
     }
 
     /// The whole entry, with its actions in the bottom row.
@@ -360,47 +486,52 @@ struct NotchClipboardView: View {
             ?? NotchSupport.restingClipboardHighlight(entries.map { ($0.id, $0.isPinned) })
     }
 
-    /// The search field, once the header's magnifier or a typed letter opens
-    /// it; until then the page keeps all its room for the entries.
-    @ViewBuilder private var header: some View {
-        if searchOpen {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(text.search, text: $query).textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .focused($searching)
-                    .accessibilityLabel(text.search)
-            }
-            .padding(.horizontal, 12)
-            .frame(height: NotchLayout.clipboardSearchHeight)
-            .modifier(NotchControlSurface(cornerRadius: 14))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(.white.opacity(searching ? 0.34 : 0), lineWidth: 1)
-                    .allowsHitTesting(false)
-            }
-            .animation(.easeOut(duration: 0.15), value: searching)
+    /// The search field stays mounted and focused while it is hidden, so its
+    /// editor and any input method get every key from the first one. The
+    /// magnifier or typing shows it; until then the entries keep its room.
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField(text.search, text: $query).textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .focused($searching)
+                .accessibilityLabel(text.search)
         }
+        .padding(.horizontal, 12)
+        .frame(height: NotchLayout.clipboardSearchHeight)
+        .modifier(NotchControlSurface(cornerRadius: 14))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(.white.opacity(searching ? 0.34 : 0), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .animation(.easeOut(duration: 0.15), value: searching)
+        .frame(height: searchOpen ? NotchLayout.clipboardSearchHeight : 0, alignment: .top)
+        .opacity(searchOpen ? 1 : 0)
+        .clipped()
+        .allowsHitTesting(searchOpen)
+        .accessibilityHidden(!searchOpen)
     }
 
     private func openSearch() {
         searchOpen = true
-        // The field exists on the next pass, and only then can it take focus.
-        DispatchQueue.main.async { searching = true }
+        searching = true
     }
 
+    /// Closing empties the search and hides the field, which keeps the focus
+    /// so the next key typed starts a new one.
     private func closeSearch() {
         query = ""
-        searching = false
         searchOpen = false
+        searching = true
     }
 
     /// Up and Down move the highlight and Return pastes or copies it like a
-    /// click, with or without the search field focused. A letter opens the
-    /// search and starts it.
-    private func handleKey(keyCode: UInt16, characters: String, hasCommandModifier: Bool, editing: Bool) -> Bool {
+    /// click. A typed letter shows the search field and goes on to it.
+    private func handleKey(keyCode: UInt16, characters: String, modifiers: NSEvent.ModifierFlags,
+                           composing: Bool, editing: Bool) -> Bool {
         guard let key = NotchSupport.clipboardKey(keyCode: keyCode, characters: characters,
-                                                  hasCommandModifier: hasCommandModifier, editing: editing) else { return false }
+                                                  modifiers: modifiers, composing: composing) else { return false }
         let ids = entries.map(\.id)
         switch key {
         case .move(let backwards):
@@ -413,10 +544,11 @@ struct NotchClipboardView: View {
                   let entry = entries.first(where: { $0.id == id }) else { return false }
             activate(entry)
             return true
-        case .type(let typed):
-            query += typed
-            openSearch()
-            return true
+        case .reveal:
+            searchOpen = true
+            // The focus Tab took elsewhere comes back for the keys that follow.
+            if !editing { searching = true }
+            return false
         }
     }
 
@@ -453,15 +585,23 @@ struct NotchClipboardView: View {
         history.remove(entry)
     }
 
+    /// A picture rounded at its own edges, then placed in the room it may
+    /// take. Rounding that room instead would leave square corners wherever
+    /// the picture is narrower than it.
+    private func thumbnail<Picture: View>(_ picture: Picture, compact: Bool) -> some View {
+        picture
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .frame(maxWidth: compact ? 72 : .infinity, maxHeight: .infinity, alignment: compact ? .leading : .topLeading)
+    }
+
     @ViewBuilder private func preview(_ entry: ClipboardHistoryEntry, compact: Bool, open: Bool = false) -> some View {
         switch entry.kind {
         case .image:
             if let name = entry.imageFile {
-                ClipboardThumbnailImage(source: .stored(name: name),
-                                        aspectRatio: entry.imageAspectRatio,
-                                        failureText: "\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
-                    .frame(maxWidth: compact ? 72 : .infinity, maxHeight: .infinity, alignment: compact ? .leading : .topLeading)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                thumbnail(ClipboardThumbnailImage(source: .stored(name: name),
+                                                  aspectRatio: entry.imageAspectRatio,
+                                                  failureText: "\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)"),
+                          compact: compact)
                     .help("\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)")
             } else {
                 searchText("\(text.imageEntryLabel) · \(entry.imageDimensionsLabel)", matching: searchTokens)
@@ -473,20 +613,24 @@ struct NotchClipboardView: View {
             // or its count, the way the panel lists files.
             if entry.filePaths.count == 1, let path = entry.filePaths.first,
                ClipboardImageStore.isImageFile(atPath: path) {
-                ClipboardThumbnailImage(source: .file(path: path),
-                                        failureText: entry.fileNames.first ?? entry.preview)
-                    .frame(maxWidth: compact ? 72 : .infinity, maxHeight: .infinity, alignment: compact ? .leading : .topLeading)
-                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                thumbnail(ClipboardThumbnailImage(source: .file(path: path),
+                                                  failureText: entry.fileNames.first ?? entry.preview),
+                          compact: compact)
                     .help(path)
             } else {
                 // A count of several files is no text the search reads.
-                Label {
-                    searchText(entry.filePaths.count == 1
-                                   ? (entry.fileNames.first ?? entry.preview)
-                                   : String(format: text.fileCountFormat, entry.filePaths.count),
-                               matching: entry.filePaths.count == 1 ? searchTokens : [])
-                } icon: {
-                    Image(systemName: "folder")
+                let name = searchText(entry.filePaths.count == 1
+                                          ? (entry.fileNames.first ?? entry.preview)
+                                          : String(format: text.fileCountFormat, entry.filePaths.count),
+                                      matching: entry.filePaths.count == 1 ? searchTokens : [])
+                // A compact row leads with the files' own icon already, and
+                // opened it keeps that icon rather than becoming a folder.
+                Group {
+                    if compact {
+                        name
+                    } else {
+                        Label { name } icon: { if open { leadingIcon(entry) } else { Image(systemName: "folder") } }
+                    }
                 }
                 .font(.system(size: 12))
                 .lineLimit(compact ? 1 : 2)
@@ -511,10 +655,12 @@ struct NotchClipboardView: View {
 }
 
 /// Reads the arrow keys and Return before the search field's editor does,
-/// which would otherwise spend them moving the caret, and the letters typed
-/// while the field is closed. It lives as long as the page does.
+/// which would otherwise spend them moving the caret, and shows the hidden
+/// field as typing reaches it. It lives as long as the page does.
 private struct ClipboardKeyMonitor: NSViewRepresentable {
-    var handleKey: (UInt16, String, Bool, Bool) -> Bool
+    var handleKey: (UInt16, String, NSEvent.ModifierFlags, Bool, Bool) -> Bool
+    /// A dead key or an input method's first key marks text in the field.
+    var composed: () -> Void
 
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -524,10 +670,11 @@ private struct ClipboardKeyMonitor: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSView, context: Context) {
         context.coordinator.handleKey = handleKey
+        context.coordinator.composed = composed
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(handleKey: handleKey)
+        Coordinator(handleKey: handleKey, composed: composed)
     }
 
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
@@ -535,23 +682,34 @@ private struct ClipboardKeyMonitor: NSViewRepresentable {
     }
 
     final class Coordinator {
-        var handleKey: (UInt16, String, Bool, Bool) -> Bool
+        var handleKey: (UInt16, String, NSEvent.ModifierFlags, Bool, Bool) -> Bool
+        var composed: () -> Void
         private var monitor: Any?
 
-        init(handleKey: @escaping (UInt16, String, Bool, Bool) -> Bool) {
+        init(handleKey: @escaping (UInt16, String, NSEvent.ModifierFlags, Bool, Bool) -> Bool,
+             composed: @escaping () -> Void) {
             self.handleKey = handleKey
+            self.composed = composed
         }
 
         func install(for view: NSView) {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak view] event in
                 guard let self, let window = view?.window, event.window === window else { return event }
                 let editor = (window.firstResponder as? NSTextView).flatMap { $0.isFieldEditor ? $0 : nil }
-                // A word being composed keeps its keys.
-                guard editor?.hasMarkedText() != true else { return event }
-                // Another text view, such as a dialog's, keeps its keys too.
+                // Another text view, such as a dialog's, keeps its keys.
                 if editor == nil, window.firstResponder is NSTextView { return event }
-                let held = !event.modifierFlags.intersection([.command, .control, .option]).isEmpty
-                return self.handleKey(event.keyCode, event.characters ?? "", held, editor != nil) ? nil : event
+                let composing = editor?.hasMarkedText() == true
+                if self.handleKey(event.keyCode, event.characters ?? "", event.modifierFlags, composing, editor != nil) {
+                    return nil
+                }
+                // A dead key reports no character and marks its accent only
+                // once the editor has it, so the field shows then.
+                if let editor, !composing {
+                    DispatchQueue.main.async { [weak self, weak editor] in
+                        if editor?.hasMarkedText() == true { self?.composed() }
+                    }
+                }
+                return event
             }
         }
 
@@ -580,8 +738,25 @@ private enum ClipboardSourceApps {
     }
 }
 
+/// The icon Finder shows for an entry's files, looked up once per set of
+/// paths: the page draws its rows again whenever the pointer moves between them.
+@MainActor
+private enum ClipboardFileIcons {
+    private static var cache: [[String]: NSImage] = [:]
+
+    static func icon(for paths: [String]) -> NSImage? {
+        if let cached = cache[paths] { return cached }
+        guard let icon = NSWorkspace.shared.icon(forFiles: paths) else { return nil }
+        // Entries come and go over days; a full cache starts again.
+        if cache.count >= 256 { cache.removeAll() }
+        cache[paths] = icon
+        return icon
+    }
+}
+
 /// The filter, the clearing of recent entries and the history window, which
-/// sit in the island's header beside its other actions.
+/// sit in the island's header beside its other actions, or in its menu
+/// beside the camera.
 struct NotchClipboardHeaderActions: View {
     @ObservedObject var service: NotchService
     @ObservedObject private var history = ClipboardHistoryService.shared
@@ -589,22 +764,31 @@ struct NotchClipboardHeaderActions: View {
     private var text: ClipboardFeatureStrings { FeatureStrings.clipboard(l10n.language) }
 
     var body: some View {
-        NotchIconButton(symbol: "pin", title: text.pinned, selected: service.clipboardPinnedOnly) {
+        // A filter's glyph: the header's pin keeps the island open.
+        NotchIconButton(symbol: service.clipboardPinnedOnly ? "line.3.horizontal.decrease.circle.fill"
+                            : "line.3.horizontal.decrease.circle",
+                        title: text.pinned, selected: service.clipboardPinnedOnly) {
             service.clipboardPinnedOnly.toggle()
         }
-        NotchIconButton(symbol: "trash", title: text.clearRecent) {
-            let ids = history.recentEntriesSnapshot
-            DispatchQueue.main.async {
-                guard NSAlert.confirmAboveIsland(String(format: text.clearRecentConfirmFormat, ids.count),
-                                                 message: text.clearRecentConfirmMessage,
-                                                 action: text.clearRecent, destructive: true,
-                                                 cancel: text.cancel) else { return }
-                history.clearRecent(ids)
-            }
-        }
-        .disabled(history.recentEntries.isEmpty)
+        NotchIconButton(symbol: "trash", title: text.clearRecent, action: Self.confirmClearRecent)
+            .disabled(history.recentEntries.isEmpty)
         NotchIconButton(symbol: "arrow.up.forward.app", title: text.title) {
             service.perform { history.showHistoryWindow(preferNotch: false) }
+        }
+    }
+
+    /// Clearing the recent entries asks first, above the island.
+    static func confirmClearRecent() {
+        let history = ClipboardHistoryService.shared
+        let text = FeatureStrings.clipboard(L10n.shared.language)
+        let ids = history.recentEntriesSnapshot
+        guard !ids.isEmpty else { return }
+        DispatchQueue.main.async {
+            guard NSAlert.confirmAboveIsland(String(format: text.clearRecentConfirmFormat, ids.count),
+                                             message: text.clearRecentConfirmMessage,
+                                             action: text.clearRecent, destructive: true,
+                                             cancel: text.cancel) else { return }
+            history.clearRecent(ids)
         }
     }
 }

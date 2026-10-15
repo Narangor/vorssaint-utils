@@ -1154,6 +1154,14 @@ def main():
           + "var editor: NotchEditorStrings { FeatureStrings.notchEditor(language) }\n"
           + 'var body: some View { destination(title, symbol: "tray.full", value: .constant(true)) }\n'
           + declaration("Sources/Vorssaint/UI/Settings/NotchSettings.swift", "    private func destination(")
+          # The clipboard's entry size, its value as Settings stored it.
+          + "}\nstruct ClipboardEntrySize: View {\nlet language: AppLanguage\n"
+          + "@State var clipboardCardSize = NotchClipboardCardSize.comfortable.rawValue\n"
+          + "var size: NotchClipboardSizeStrings { FeatureStrings.notchClipboardSize(language) }\n"
+          + "var body: some View {\n"
+          + declaration("Sources/Vorssaint/UI/Settings/NotchSettings.swift",
+                        '                    SettingsChoiceRow(symbol: "rectangle.compress.vertical"')
+          + "}\n"
           + "}\nstruct Limits: View {\nlet language: AppLanguage\n"
           + "@State var limitDisplay = NotchAgentLimitDisplay.remaining.rawValue\n"
           + "var text: NotchAgentStrings { FeatureStrings.notchAgents(language) }\n"
@@ -1180,6 +1188,59 @@ def main():
                         ("Budget", '            SettingsMenuRow(symbol: "dollarsign.circle"', False),
                         ("LimitFocus", '            SettingsMenuRow(symbol: "rectangle.topthird.inset.filled"', False)])
           + "}\n")
+    # The clipboard page's size, keys, pointer and highlight handling, on a page that only keeps their state.
+    clipboard_view = "Sources/Vorssaint/UI/Notch/NotchClipboardView.swift"
+    write("NotchClipboardPage.swift", "import SwiftUI\nextension NotchClipboardPageTests {\n"
+          + "@MainActor final class Page {\nstruct ClipboardHistoryEntry {\nlet id: UUID\nvar text = \"\"\nvar isPinned = false\n"
+          + "var cardPreview: String { HistoryEntry(text: text).cardPreview }\n}\n"
+          + "var preview = false\nvar reduceMotion = true\nvar cardSize = NotchClipboardCardSize.compact.rawValue\n"
+          + "var hoveredID: UUID?\nvar expandedID: UUID?\n"
+          + "var dwell: (id: UUID, task: Task<Void, Never>)?\nvar closing: (id: UUID, task: Task<Void, Never>)?\n"
+          + "var entries: [ClipboardHistoryEntry] = []\nvar highlightedID: UUID?\nvar keysMoved = false\n"
+          + "var query = \"\"\nvar searchOpen = false\nvar searching = false\nvar activated: [UUID] = []\n"
+          + "func activate(_ entry: ClipboardHistoryEntry) { activated.append(entry.id) }\n"
+          # The list the page scrolls, which only records where it was asked to go.
+          + "var size = CGSize(width: 504, height: 180)\n"
+          + "final class ScrollViewProxy {\nvar scrolls: [(id: UUID, anchor: UnitPoint?)] = []\n"
+          + "func scrollTo(_ id: UUID, anchor: UnitPoint? = nil) { scrolls.append((id, anchor)) }\n}\n"
+          + "".join(declaration(clipboard_view, prefix).replace("    private ", "    ", 1) for prefix in [
+              "    private func appeared()", "    private func queryChanged(",
+              "    private var comfortable: Bool {", "    private var rowHeight: CGFloat {", "    private func hover(",
+              "    private func openSearch()", "    private func closeSearch()", "    private func handleKey(",
+              "    private func openText(", "    private func searchHighlight(", "    private func follow(",
+              "    private func thumbnail<"])
+          + "}\n}\n")
+    # The header's menu beside the camera and its buttons below it, with the services their
+    # entries reach as stand-ins, and the title width that decides whether the title sits there.
+    components = "Sources/Vorssaint/UI/Notch/NotchComponents.swift"
+    write("NotchHeaderMenu.swift", "import SwiftUI\nextension NotchHeaderMenuTests {\n"
+          + "".join(declaration(components, prefix).replace("private struct", "struct", 1) for prefix in [
+              "struct NotchMenuItem {", "struct NotchButtonStyle:", "struct NotchIconButton: View {",
+              "struct NotchMenuButton<Label: View>: View {", "final class NotchMenuAnchor: NSObject {",
+              "private struct NotchMenuAnchorView: NSViewRepresentable {"])
+          + "struct NotchClipboardHeaderActions: View {\nlet service: Service\n"
+          + "let history = ClipboardHistoryService.shared\n"
+          + "var text: ClipboardFeatureStrings { FeatureStrings.clipboard(L10n.shared.language) }\n"
+          + "static var clears = 0\nstatic func confirmClearRecent() { clears += 1 }\n"
+          + declaration("Sources/Vorssaint/UI/Notch/NotchClipboardView.swift", "    var body: some View {",
+                        scope="struct NotchClipboardHeaderActions: View {")
+          + "}\nstruct Header {\nlet service: Service\nlet launcher = Launcher()\nvar l10n = Language()\n"
+          + "let updates = Updates()\nvar headerHovered = false\nvar reduceMotion = true\n"
+          + "var showsCapturesClear = false\nvar showsClipboardActions = false\nvar showsNotificationsClear = false\n"
+          + "var text: NotchStrings { FeatureStrings.notch(l10n.language) }\n"
+          + "".join(declaration("Sources/Vorssaint/UI/Notch/NotchView.swift", prefix).replace("private func", "func", 1)
+                    for prefix in ["    private func overflowItems(", "    private func pageTitle(",
+                                   "    private func overflowMenu(", "    private func headerActions(",
+                                   "    private func clipboardActionsInMenu("])
+          + "}\nfinal class Island {\nvar geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1710, height: 1112),\n"
+          + "safeAreaTop: 37.5, cameraWidth: 208)\n"
+          + "var showingSections = false\nvar showingAppPanel = false\nvar selectedMetric: Int?\n"
+          + "var modules: [NotchModule] = NotchModule.allCases\nvar selected = NotchModule.clipboard\n"
+          + "var headerShowsSectionsButton = false\nvar detailTitle = \"Detail\"\n"
+          + "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
+              "    private func previewGeometry(for module: NotchModule, sectionsButton: Bool)",
+              "    private var headerTitleWidth: CGFloat {", "    var clipboardHeaderShowsSearch: Bool {"])
+          + "}\n}\n")
     media_workspace = "Sources/Vorssaint/UI/Media/MediaWorkspaceView.swift"
     write("MediaWorkspaceLayout.swift", "import AppKit\nimport SwiftUI\nimport UniformTypeIdentifiers\n"
           + "extension MediaWorkspaceLayoutTests {\n"

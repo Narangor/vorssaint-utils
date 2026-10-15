@@ -1495,7 +1495,7 @@ enum Defaults {
         DefaultsKey.notchBattery: true,
         DefaultsKey.notchClipboard: true,
         DefaultsKey.notchClipboardWindow: true,
-        DefaultsKey.notchClipboardCardSize: NotchClipboardCardSize.compact.rawValue,
+        DefaultsKey.notchClipboardCardSize: NotchClipboardCardSize.comfortable.rawValue,
         DefaultsKey.notchCapture: true,
         DefaultsKey.notchTrackChange: true,
         DefaultsKey.notchMusicActivity: false,
