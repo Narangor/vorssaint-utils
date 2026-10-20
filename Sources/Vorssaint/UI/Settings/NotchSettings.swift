@@ -66,6 +66,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchShowPlayingMusic) private var showPlayingMusic = true
     @AppStorage(DefaultsKey.notchIncludeOtherPlayers) private var includeOtherPlayers = true
     @AppStorage(DefaultsKey.notchPreferredPlayer) private var preferredPlayer = NotchPreferredPlayer.automatic
+    @AppStorage(DefaultsKey.notchMusicSideButton) private var musicSideButton = NotchMusicSidePlace.output.rawValue
     @AppStorage(DefaultsKey.notchIdleContent) private var idle = NotchIdleContent.music.rawValue
     @AppStorage(DefaultsKey.notchLowBatteryTint) private var lowBatteryTint = false
     @AppStorage(DefaultsKey.notchLowBatteryThreshold) private var lowBatteryThreshold = NotchSupport.defaultLowBatteryThreshold
@@ -432,6 +433,13 @@ struct NotchSettings: View {
                     ForEach(NotchPreferredPlayer.choices(in: preferredPlayers ?? [], including: preferredPlayer), id: \.bundleID) { app in
                         Text(app.name).tag(app.bundleID)
                     }
+                }
+                .labelsHidden()
+            }
+            SettingsRow(symbol: "heart", title: music.sideButton, caption: music.sideButtonHint) {
+                Picker(music.sideButton, selection: $musicSideButton) {
+                    Text(music.sideButtonOutput).tag(NotchMusicSidePlace.output.rawValue)
+                    Text(music.sideButtonLike).tag(NotchMusicSidePlace.like.rawValue)
                 }
                 .labelsHidden()
             }

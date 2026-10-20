@@ -804,6 +804,7 @@ enum DefaultsKey {
     static let notchShowPlayingMusic = "notchShowPlayingMusic"
     static let notchIncludeOtherPlayers = "notchIncludeOtherPlayers"
     static let notchPreferredPlayer = "notchPreferredPlayer"
+    static let notchMusicSideButton = "notchMusicSideButton"   // output | like
     static let notchDefaultProfileInitialized = "notchDefaultProfileInitialized" // local migration marker; never backed up
     static let notchInitialExtensionsInstalled = "notchInitialExtensionsInstalled" // local first-install marker; never backed up
     static let notchAgentsOptInMigrated = "notchAgentsOptInMigrated" // local migration marker; never backed up
@@ -1415,6 +1416,7 @@ enum Defaults {
         DefaultsKey.notchShowPlayingMusic: true,
         DefaultsKey.notchIncludeOtherPlayers: true,
         DefaultsKey.notchPreferredPlayer: "",
+        DefaultsKey.notchMusicSideButton: NotchMusicSidePlace.output.rawValue,
         DefaultsKey.notchIdleContent: NotchIdleContent.music.rawValue,
         DefaultsKey.notchHiddenControls: NotchControlItem.defaultHidden,
         DefaultsKey.notchScratchpadControlHidden: false,
